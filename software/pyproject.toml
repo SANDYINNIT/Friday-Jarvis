@@ -1,0 +1,52 @@
+[tool.poetry]
+name = "01"
+packages = [
+    {include = "source"},
+]
+include = ["main.py", "source/server/ui/*"]
+version = "0.0.14"
+description = "The #1 open-source voice interface for desktop, mobile, and ESP32 chips."
+authors = ["Killian <killian@openinterpreter.com>"]
+license = "AGPL"
+readme = "../README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+livekit = "^0.17.2"
+livekit-agents = "^0.10.0"
+livekit-plugins-deepgram = "^0.6.7"
+livekit-plugins-openai = "^0.10.1"
+livekit-plugins-silero = "^0.7.1"
+livekit-plugins-elevenlabs = "^0.7.5"
+segno = "^1.6.1"
+open-interpreter = {path = "tmp-oi/open_interpreter-0.4.3-py3-none-any.whl"}
+litellm = "^1.100.0"
+mcp = "==1.26.0"
+ngrok = "^1.4.0"
+realtimetts = "^0.4.5"
+realtimestt = "^0.2.41"
+pynput = "^1.7.7"
+yaspin = "^3.0.2"
+pywebview = "^5.2"
+livekit-plugins-cartesia = "^0.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+01 = "main:app"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+isort = "^5.12.0"
+pre-commit = "^3.6.2"
+pytest = "^8.1.1"
+
+[tool.black]
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true

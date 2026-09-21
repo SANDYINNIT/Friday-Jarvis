@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY COMMAND CENTER</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="jarvis-hud">
+    <!-- Top Bar -->
+    <header class="jarvis-topbar">
+      <div class="brand">
+        <div class="brand-dot"></div>
+        <span class="brand-name">FRIDAY COMMAND CENTER</span>
+      </div>
+      <div class="sys-status-badge">
+        <span class="status-dot"></span> SYSTEM STATUS · <span id="sys-state">OPTIMAL</span>
+      </div>
+      <div class="topbar-center-clock" id="clock">---</div>
+      <div class="topbar-right">
+        <span id="connection" class="conn offline">OFFLINE</span>
+        <span class="operator-badge">Operator · Commander</span>
+      </div>
+    </header>
+
+    <!-- Main Workspace Grid -->
+    <div class="jarvis-grid">
+      <!-- Left Navigation Sidebar -->
+      <nav class="jarvis-sidebar">
+        <div class="nav-item active" data-target="view-dashboard">Command Center</div>
+        <div class="nav-item" data-target="view-ai-core">AI Core</div>
+        <div class="nav-item" data-target="view-agents">Agents</div>
+        <div class="nav-item" data-target="view-tasks">Tasks</div>
+        <div class="nav-item" data-target="view-calendar">Calendar</div>
+        <div class="nav-item" data-target="view-memory">Memory <span id="memory-count" class="badge">0</span></div>
+        <div class="nav-item" data-target="view-conversations">Conversations</div>
+        <div class="nav-item" data-target="view-knowledge-base">Knowledge Base</div>
+        <div class="nav-item" data-target="view-tools">Tools & Skills</div>
+        <div class="nav-item" data-target="view-workflows">Workflows</div>
+        <div class="nav-item" data-target="view-settings">Settings</div>
+
+        <div class="voice-status-box">
+          <div class="section-label">VOICE STATUS</div>
+          <div class="waveform-mini" id="voice-waveform">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="mic-status-text" id="mic-status">Voice active — tap to mute</div>
+          <button id="mic" class="btn btn-mic-jarvis" type="button" data-paused="false">Mute</button>
+        </div>
+      </nav>
+
+      <!-- Center Dynamic HUD Area -->
+      <main class="jarvis-main">
+        
+        <!-- View 1: Command Center Dashboard -->
+        <div id="view-dashboard" class="tab-pane active">
+          <div class="row-top">
+            <!-- AI Core Overview Card -->
+            <div class="jarvis-card core-overview-card">
+              <div class="card-header">AI CORE OVERVIEW</div>
+              <div class="overview-grid">
+                <div class="metric-pill">AI Core <span>Active</span></div>
+                <div class="metric-pill">Memory <span id="mem-stored-stat">0</span></div>
+                <div class="metric-pill">Voice <span style="color:#52f2b1">Online</span></div>
+                <div class="metric-pill">System <span style="color:#52f2b1">Optimal</span></div>
+              </div>
+            </div>
+
+            <!-- Central Holographic Core -->
+            <div class="holographic-core-card">
+              <div class="orb-wrap">
+                <canvas id="orb"></canvas>
+                <div class="orb-readout">
+                  <div class="core-title">FRIDAY</div>
+                  <div class="core-subtitle">AI CORE</div>
+                  <div class="core-version">v3.0.0</div>
+                </div>
+              </div>
+              <div class="orb-state" id="state">STANDBY</div>
+              <div class="orb-detail" id="detail">Ready</div>
+            </div>
+
+            <!-- Live Intelligence Feed -->
+            <div class="jarvis-card intelligence-card">
+              <div class="card-header">LIVE INTELLIGENCE FEED <span class="live-dot">LIVE</span></div>
+              <div class="intelligence-stream" id="log-output">
+                <div class="intel-item info">System initialized successfully. Monitoring active...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row-middle">
+            <!-- Active Agents Grid -->
+            <div class="jarvis-card active-agents-card">
+              <div class="card-header">CORE CAPABILITIES</div>
+              <div class="agents-grid">
+                <div class="agent-box active">
+                  <div class="agent-name">Coding</div>
+                  <div class="agent-status">Code & File Ops</div>
+                </div>
+                <div class="agent-box active">
+                  <div class="agent-name">Research</div>
+                  <div class="agent-status">Web & Local Queries</div>
+                </div>
+                <div class="agent-box standby">
+                  <div class="agent-name">Memory</div>
+                  <div class="agent-status">RAG & Recall</div>
+                </div>
+                <div class="agent-box standby">
+                  <div class="agent-name">Browser</div>
+                  <div class="agent-status">Window Control</div>
+                </div>
+                <div class="agent-box standby">
+                  <div class="agent-name">Tasks</div>
+                  <div class="agent-status">Scheduling</div>
+                </div>
+                <div class="agent-box active">
+                  <div class="agent-name">System</div>
+                  <div class="agent-status">Telemetry</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- LLM Status Card -->
+            <div class="jarvis-card llm-status-card">
+              <div class="card-header">LLM STATUS</div>
+              <div class="llm-grid">
+                <div class="llm-pill connected"><span>Ollama (Qwen3)</span> Connected</div>
+                <div class="llm-pill connected"><span>Edge TTS</span> Active</div>
+                <div class="llm-pill connected"><span>Memory RAG</span> Ready</div>
+                <div class="llm-pill connected"><span>Intent Judge</span> Enabled</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row-bottom">
+            <!-- Quick System Stats -->
+            <div class="jarvis-card sys-stats-card">
+              <div class="card-header">SYSTEM MONITOR</div>
+              <div class="stats-grid">
+                <div class="metric-pill">CPU Usage <span id="stat-cpu">--%</span></div>
+                <div class="metric-pill">Memory Usage <span id="stat-ram">--%</span></div>
+                <div class="metric-pill">Focus <span id="focus-pill">--</span></div>
+                <div class="metric-pill">Desktop Ear <span id="ear-pill">--</span></div>
+              </div>
+            </div>
+
+            <!-- Direct Channel Chat List -->
+            <div class="jarvis-card direct-chat-card">
+              <div class="card-header">DIRECT CHANNEL FEED</div>
+              <div id="chat-list" class="chat-list-jarvis">
+                <div class="chat-empty">Waiting for FRIDAY interaction...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 2: AI Core Info & Endpoints -->
+        <div id="view-ai-core" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">AI CORE DIAGNOSTICS</div>
+            <div class="settings-details">
+              <div class="detail-row"><span>MODEL ENGINE:</span> <span id="sys-model">---</span></div>
+              <div class="detail-row"><span>VISION MODEL:</span> <span id="sys-vision">---</span></div>
+              <div class="detail-row"><span>TTS ENGINE:</span> <span id="sys-tts">---</span></div>
+              <div class="detail-row"><span>CORE VERSION:</span> <span id="sys-version">---</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 3: Active Sub-Agents Console -->
+        <div id="view-agents" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">
+              <span>MULTI-PROVIDER AI ORCHESTRATOR & AGENT MATRIX</span>
+              <span id="agents-live-badge" class="badge green">LIVE MATRIX</span>
+            </div>
+
+            <div class="agents-summary-bar">
+              <div class="summary-pill"><span>TOTAL AI AGENTS:</span> <strong id="agents-summary-total">10</strong></div>
+              <div class="summary-pill"><span>ACTIVE ENGAGEMENT:</span> <strong id="agents-summary-active">STANDBY</strong></div>
+              <div class="summary-pill"><span>CURRENT MODEL:</span> <strong id="agents-summary-model">---</strong></div>
+              <div class="summary-pill"><span>CURRENT PROVIDER:</span> <strong id="agents-summary-provider">---</strong></div>
+              <div class="summary-pill"><span>ROUTING TIER:</span> <strong id="agents-summary-tier">NORMAL</strong></div>
+            </div>
+
+            <div class="agents-summary-bar">
+            <div id="agents-switch-line" class="summary-pill" style="font-size: 10px; color: var(--accent-cyan); width: 100%;">No provider switches yet.</div>
+          </div>
+          <div class="agents-matrix-grid" id="agents-container">
+              <div class="agent-loading-state">Initialising AI Orchestration Matrix...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 4: Tasks Panel -->
+        <div id="view-tasks" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">MISSION TASK SCHEDULER</div>
+            <div class="list-container">
+              <div class="list-item">● Finalize FRIDAY Command Center UI panels. <span class="badge">In Progress</span></div>
+              <div class="list-item">● Verify local whisper voice latency metrics. <span class="badge green">Optimal</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 5: Calendar Panel -->
+        <div id="view-calendar" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">MISSION SCHEDULE <span id="schedule-count" class="badge">0</span></div>
+            <div id="schedule-container" class="list-container">
+              <div class="list-item">13:00 - Diagnostic review with Sir. <span class="badge">Complete</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 6: Memory Network Node -->
+        <div id="view-memory" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">MEMORY NEURAL NET NETWORK NODES</div>
+            <div id="memory-orbs-container" class="memory-orbs-container">
+              <div class="mem-empty">No neural memory nodes stored yet.</div>
+            </div>
+            <div id="memory-tooltip" class="memory-tooltip">Hover over a memory node above to inspect its neural weight and content.</div>
+            
+            <div class="memory-table-wrap">
+              <div class="card-header" style="margin-top:16px;">ADD / EDIT MEMORY</div>
+              <div class="memory-add-row">
+                <input id="memory-new-key" class="memory-add-input" placeholder="Key (e.g. user-preference)" />
+                <input id="memory-new-content" class="memory-add-input" placeholder="What should FRIDAY remember..." />
+                <button id="memory-add-btn" class="tiny-btn add" type="button">Add Memory</button>
+              </div>
+              <div id="memory-add-status" class="memory-add-status"></div>
+              <div class="card-header" style="margin-top:16px;">ALL STORED PERSISTENT MEMORIES</div>
+              <table class="mem-table" id="memory-table">
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Content</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 7: Active Conversations -->
+        <div id="view-conversations" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">CONVERSATION STREAM</div>
+            <div id="conversation-history" class="list-container">
+              <!-- Rendered conversation feeds -->
+            </div>
+          </div>
+        </div>
+
+        <!-- View 8: Knowledge Base / Notes -->
+        <div id="view-knowledge-base" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">KNOWLEDGE BASE — SECTIONS</div>
+            <div id="knowledge-sections" class="kbase-sections">
+              <div class="chat-empty">Loading knowledge base...</div>
+            </div>
+          </div>
+          <div class="jarvis-card large-pane">
+            <div class="card-header">PROJECT NOTES: memory/project_notes.md</div>
+            <div id="knowledge-base-notes" class="notes-preview-container">
+              Loading project notes...
+            </div>
+          </div>
+        </div>
+
+        <!-- View 9: Tools & Skills Panel -->
+        <div id="view-tools" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">TOOLS & SKILLS — SECTIONS</div>
+            <div id="skills-list-view" class="tools-sections">
+              <div class="chat-empty">Loading tools...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 10: Workflows Orchestrator -->
+        <div id="view-workflows" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">ACTIVE SYSTEM WORKFLOWS</div>
+            <div class="list-container">
+              <div class="list-item">● Voice-command-to-action routing matrix <span class="badge green">ACTIVE</span></div>
+              <div class="list-item">● Ambient intent judge trigger loop <span class="badge green">ACTIVE</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View 11: Settings -->
+        <div id="view-settings" class="tab-pane">
+          <div class="jarvis-card large-pane">
+            <div class="card-header">FRIDAY SETTINGS</div>
+            <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-size: 12px; font-weight: bold; color: var(--text-bright);">Startup with Windows</div>
+                  <div style="font-size: 10px; color: #69849c;">FRIDAY starts when the PC boots — voice brain lives in the system tray, the app and console stay hidden until you open them.</div>
+                </div>
+                <label style="position: relative; display: inline-block; width: 46px; height: 24px;">
+                  <input type="checkbox" id="setting-startup" style="opacity: 0; width: 0; height: 0;">
+                  <span id="setting-startup-slider" style="position: absolute; cursor: pointer; inset: 0; background: #33506b; border-radius: 24px; transition: all 0.2s;"></span>
+                </label>
+              </div>
+              <div style="font-size: 10px; color: #69849c;">
+                <div>System tray: right-click FRIDAY → Open App (console + HUD), Close App (background), Exit FRIDAY.</div>
+                <div id="setting-tray-status">Checking tray availability…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- Footer Action Bar -->
+    <footer class="jarvis-footer">
+      <div class="footer-left-meta">Location: Local · Security: Enforced</div>
+      <form id="chat-form" class="talk-to-jarvis-bar">
+        <div class="talk-waveform"><span></span><span></span><span></span><span></span><span></span></div>
+        <input type="text" id="chat-input" placeholder="TALK TO FRIDAY — I am listening..." autocomplete="off">
+        <button type="submit" class="talk-send-btn">Send</button>
+      </form>
+      <div class="footer-right-meta">v3.0.0 · FRIDAY Production HUD</div>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

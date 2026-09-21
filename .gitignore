@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Secrets / runtime (keep the redacted template, ignore real runtime data)
+.friday/
+dot_friday/api_credentials.json
+*.db
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
