@@ -13,7 +13,7 @@ import re
 import unicodedata
 import json
 from datetime import datetime, timezone
-from .screen_understanding import is_screen_request, screen_response
+from .screen_understanding import is_screen_request, screen_response, author_screen_photo
 from .memory import (
     MemoryStore,
     build_memory_context,
@@ -93,6 +93,24 @@ _TURN_ACTION_LIMIT = 50
 def _redact_text(value):
     text = str(value or "")
     return _redact(text) if text else ""
+
+
+def _redact_for_phone(value):
+    """Owner-bound Telegram replies: mask ONLY genuine secrets (tokens, keys,
+    emails, cards, phones, IPs) but KEEP real filesystem paths. The full
+    redact() turns ``D:\\01\\software`` into ``<PATH>``, which made SR's
+    honest path answers arrive as literal "<PATH>" on the phone."""
+    text = str(value or "")
+    return _redact(text, mask_paths=False) if text else ""
+
+
+# Follow-up turns that reference a screenshot FRIDAY just sent get the saved
+# vision read injected into brain context so she never pleads blind.
+_SCREENSHOT_REFERENCE_RE = re.compile(
+    r"\bscreenshot\b|\b(?:the\s+)photo\b|\bthe\s+(?:picture|shot)\b|"
+    r"\b(?:did\s+you|do\s+you)\s+(?:see|catch|lose|get)\b|"
+    r"\bwhat\s+did\s+you\s+(?:just\s+)?(?:send)\b|\byou\s+(?:just\s+)?sent\b"
+)
 
 
 _CONSOLE_NOISE_RE = re.compile(r"[\s0-9=.<>+\-_,;:/]*[0-9][\s0-9=.<>+\-_,;:/]*")
@@ -688,6 +706,10 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
     SERVER_TOOL_CAP = [
         float(os.getenv("FRIDAY_TOOL_CAP", "12"))
     ]
+    # Hard ceiling: the soft nudge above is advisory (models ignore it). If a
+    # turn keeps dry-running tools past this count, kill the agent turn outright
+    # instead of letting it loop for dozens of executions (Roblox loop: 91 runs).
+    HARD_TOOL_CAP = int(float(os.getenv("FRIDAY_HARD_TOOL_CAP", "24")))
 
     if not getattr(interpreter.llm, "_friday_trace_wrapped", False):
         original_completions = interpreter.llm.completions
@@ -825,6 +847,20 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             id(status_bus),
         )
 
+    # Questions whose answer IS the current live state (foreground window,
+    # what's open/playing right now). For these the stale `activity` journal
+    # (action timestamps like "[10:36] Spotify is already open") must NOT leak
+    # into the memory context — it reads like current state but is history.
+    _LIVE_STATE_QUERY_RE = re.compile(
+        r"\b(?:user|sir|owner|sandy|boss|bro)\s+(?:currently|right\s+now|now|just)?\s*"
+        r"(?:doing|up\s+to|working\s+on|watching|playing|listening\s+to|using)\b"
+        r"|\bwhat\s+am\s+i\s+(?:doing|watching|listening\s+to|looking\s+at)\b"
+        r"|\bhappening\s+on\s+(?:the\s+)?(?:pc|computer|screen)\b"
+        r"|\b(?:going\s+on|on\s+my\s+screen|what\s+do\s+you\s+see|"
+        r"(?:app|window|program)\s+(?:is|has|am)\s+(?:focused|active))\b",
+        re.IGNORECASE,
+    )
+
     async def dispatch_text(text, *, from_telegram=False):
         """Route webview/telegram text through the same owned interpreter turn as voice."""
         request = str(text or "").strip()
@@ -882,7 +918,13 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             server_state["telegram_turn_mute"] = False
         memory_context = ""
         if server_state["memory_store"] is not None:
-            memory_context = build_memory_context(content, server_state["memory_store"], top_n=3, max_chars=1600)
+            memory_context = build_memory_context(
+                content,
+                server_state["memory_store"],
+                top_n=3,
+                max_chars=1600,
+                exclude_topics=("activity",) if _LIVE_STATE_QUERY_RE.search(content) else (),
+            )
         if is_screen_request(content):
             server_state["active_vision_pool"] = "active"
             try:
@@ -897,6 +939,31 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             return {"accepted": True, "status": "queued"}
         if memory_context:
             content = memory_context + "\n\nUser request:\n" + content
+        last_shot = server_state.get("last_screen_shot")
+        if last_shot and _SCREENSHOT_REFERENCE_RE.search(content):
+            # Follow-up ("do you see your own screenshot that you sent?") must
+            # NOT plead blind: FRIDAY DID capture it and DID see it — the
+            # vision read gives the brain the real content to answer from.
+            content = (
+                "[Context: the screenshot I just captured and sent you showed - "
+                + str(last_shot.get("description") or "(the vision read is unavailable)")
+                + " You DID capture it and you saw it. Answer truthfully, "
+                "grounded in that description.]\n\n"
+                + content
+            )
+        if from_telegram:
+            # Make the source unmistakable: the brain must answer as a TEXT
+            # bubble on Sir's phone — no local voice, no opening/showing
+            # anything on the PC, no file artifacts unless he asks for one.
+            content = (
+                "[Sir is talking to you on Telegram — your reply goes to his "
+                "phone as a chat text. Answer in one short bubble. Do NOT "
+                "open, show, or play anything on the PC, do NOT activate "
+                "local voice, and do not send a file/screenshot unless he "
+                "explicitly asked for one. When he says 'show me', the "
+                "screenshot itself is handled for you; just acknowledge.]\n\n"
+                + content
+            )
         if response_is_active():
             server_state["pending_user_text"] = request
             server_state["pending_input"] = {"role": "user", "type": "message", "content": content}
@@ -938,16 +1005,31 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
         lowered = (text or "").lower().strip()
         # Screenshot BACK to the phone only for true capture requests —
         # never when Sir merely references screenshots ("you don't need
-        # to take a screenshot for my notifications").
-        if re.search(
-            r"^\s*(?:ok[ayy][, ]+|friday[, ]+|please[, ]+)?"
-            r"(?:send|take|grab|show|shot)\b.*\bscreenshot\b|"
-            r"\bscreenshot\s+of\s+(?:the\s+|your\s+)screen\b",
+        # to take a screenshot for my notifications"). Matches explicit
+        # "screenshot" asks AND bare "show me" / "show me your screen" /
+        # "show me what you see" — on the phone that ALWAYS means a photo.
+        capture_phrase = re.search(
+            r"\bscreenshot\b|"
+            r"\bscreenshot\s+of\s+(?:the\s+|your\s+)screen\b|"
+            r"\b(?:can\s+you\s+)?(?:show|send|share)\s+me\b"
+            r"(?:\s+(?:your\s+|my\s+|the\s+)?"
+            r"(?:screen|view|camera|desktop|display|what\s+you\s+see))?"
+            r"(?:\s*,?\s*(?:please|friday|sir|bro|boss))?"
+            r"\s*[.!?]*\s*$",
             lowered,
-        ) and not re.search(
-            r"don'?t|no\s+need|never|without|skip|"
-            r"\b(?:tell|what|why|look|check|who|see|describe)\b",
+        )
+        # "screenshot" as a bare WORD is only actionable when the message is a
+        # request, not an interrogative ("what would a screenshot show",
+        # "tell me about screenshots"). Negations and the anchored
+        # show/send/share branch are already handled by the two guards below.
+        interrogative_leaning = re.match(
+            r"(?:what|why|who|when|how|would|does|do|is|are|tell|explain)\b",
             lowered,
+        )
+        if (
+            capture_phrase
+            and not re.search(r"don'?t|no\s+need|never|without|skip", lowered)
+            and not interrogative_leaning
         ):
             from .screen_understanding import capture_screen_jpeg
 
@@ -963,12 +1045,31 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                     "view, so I couldn't capture the screen. Answer that prompt and "
                     "tell me to take the screenshot again."
                 )
+            # AI-AUTHORED content: the capture is only an infrastructure
+            # primitive — the vision chain READS the real image and the brain
+            # (qwen3:8b) composes the caption from what it truly sees. Never a
+            # canned "Fresh screenshot, Sir."; the AI decides what is shown,
+            # and the vision read is persisted so follow-ups ("do you see your
+            # own screenshot you sent?") are answered with real context.
             try:
-                await telegram_adapter.send_photo(chat_id, jpeg, caption="Fresh screenshot, Sir.")
+                server_state["active_vision_pool"] = "active"
+                caption, vision = author_screen_photo(jpeg, text)
+            finally:
+                server_state["active_vision_pool"] = None
+            if vision:
+                server_state["last_screen_shot"] = {
+                    "at": time.time(),
+                    "description": _redact_text(vision)[:1200],
+                    "caption": _redact_text(caption or "")[:600],
+                }
+            try:
+                await telegram_adapter.send_photo(
+                    chat_id, jpeg, caption=(caption or "Fresh screen capture for you, Sir.")[:1024]
+                )
             except Exception as error:
                 _flog.warning("telegram screenshot send failed: %s", _redact_text(str(error)))
                 return "Sir, I captured the screen but couldn't upload it to Telegram. Check the PC and ask again if needed."
-            return None  # photo already sent; no extra text bubble
+            return None  # photo + AI-authored caption already delivered
         speak_requested = bool(re.search(
             # anywhere in the message: 'Say "how are you"', 'Perfect, say ...',
             # 'say it out loud', 'on the headset' — position no longer matters
@@ -984,7 +1085,7 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             server_state["telegram_capture"] = None
             server_state["telegram_turn_mute"] = False
             return result["response"]
-        return "Working on it, Sir — FRIDAY will message you with the result."
+        return "On it, Sir — give me a few seconds and I'll text you back."
 
     async def telegram_photo_handler(jpeg_bytes, question, chat_id):
         from .screen_understanding import describe_image_bytes
@@ -1275,6 +1376,7 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                             server_state["memory_store"],
                             top_n=3,
                             max_chars=1600,
+                            exclude_topics=("activity",) if _LIVE_STATE_QUERY_RE.search(clean_content) else (),
                         )
 
                     if is_screen_request(content):
@@ -1383,7 +1485,7 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         # The turn just said something while a Telegram chat
                         # was waiting: send the SAME text to that phone chat.
                         capture_chat_id = str(capture.get("chat_id") or "")
-                        snippet_text = _redact_text(turn.get("assistant_snippet") or "").strip()
+                        snippet_text = _redact_for_phone(turn.get("assistant_snippet") or "").strip()
                         if capture_chat_id and snippet_text:
                             try:
                                 await telegram_adapter.send_text(capture_chat_id, snippet_text)
@@ -1618,6 +1720,54 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                     if output.get("start"):
                         tool_code_parts.clear()
                         tool_counter["n"] += 1
+                        if tool_counter["n"] > HARD_TOOL_CAP:
+                            # Hard stop: the soft nudge was ignored; kill the
+                            # agent turn so it cannot keep dry-running tools
+                            # (async_core checks stop_event before each chunk).
+                            _flog.warning(
+                                "HARD tool stop at #%s (cap %s) — terminating victim turn",
+                                tool_counter["n"], HARD_TOOL_CAP,
+                            )
+                            try:
+                                interpreter.stop_event.set()
+                            except Exception:
+                                pass
+                            publish_status(
+                                STATUS_ERROR,
+                                f"Stopped after {HARD_TOOL_CAP} tools — looping turn killed",
+                            )
+                            last_finding = ""
+                            try:
+                                from .self_improve import scratchpad_path
+                                _sp_path = scratchpad_path()
+                                if os.path.exists(_sp_path):
+                                    _recent = open(
+                                        _sp_path, "r", encoding="utf-8", errors="replace"
+                                    ).read().splitlines()
+                                    for _line in reversed(_recent):
+                                        if "OUTCOME" in _line or "assistant:" in _line:
+                                            last_finding = _line.split("|", 1)[-1].strip()[:280]
+                                            break
+                            except Exception:
+                                pass
+                            wrap = (
+                                "I hit my tool budget this turn and stopped the loop. "
+                                "What I had already confirmed: " + last_finding
+                                if last_finding
+                                else "I hit my tool budget this turn and stopped myself before looping further — ask me again and I'll keep it direct."
+                            )
+                            chat_append("tool", f"HARD STOP at tool #{tool_counter['n']} — loop terminated", status="complete")
+                            _capture = server_state.get("telegram_capture")
+                            if _capture is not None and str(_capture.get("chat_id") or ""):
+                                _c_chat_id = str(_capture.get("chat_id"))
+                                try:
+                                    await telegram_adapter.send_text(_c_chat_id, wrap)
+                                except Exception as _e:
+                                    _flog.warning("telegram hard-stop notice failed: %s", _e)
+                                # The phone got a real answer: end the muted
+                                # window so the late phase doesn't double-ping.
+                                server_state["telegram_capture"] = None
+                                server_state["telegram_turn_mute"] = False
                         trace("tool_start")
                         publish_status(STATUS_THINKING, f"Running tool #{tool_counter['n']}")
                         _play_chirp("tool_start")

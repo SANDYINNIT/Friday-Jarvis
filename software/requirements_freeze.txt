@@ -1,4 +1,7 @@
-﻿absl-py==2.1.0
+﻿# FRIDAY dependencies — byte-exact snapshot of the tested environment (Python 3.11, Windows).
+# Install (virtualenv optional):  pip install -r requirements_freeze.txt
+# The patched open-interpreter wheel installs from the relative tmp-oi\ path (see open-interpreter line below).
+absl-py==2.1.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
 aiosignal==1.4.0
@@ -161,7 +164,7 @@ num2words==0.5.13
 numba==0.60.0
 numpy==1.26.4
 onnxruntime==1.19.2
-open-interpreter @ file:tmp-oi/open_interpreter-0.4.3-py3-none-any.whl#sha256=f52cc0f10bde4f343badeafde488d48a24df32023a80a79bb1e45f555365a9d6
+tmp-oi\open_interpreter-0.4.3-py3-none-any.whl
 openai==2.54.0
 opencv-python==4.10.0.84
 openwakeword==0.6.0

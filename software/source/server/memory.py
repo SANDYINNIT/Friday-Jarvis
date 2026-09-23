@@ -326,7 +326,7 @@ class MemoryStore:
             row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
         return dict(row)
 
-    def recall(self, query, *, top_n=DEFAULT_TOP_N):
+    def recall(self, query, *, top_n=DEFAULT_TOP_N, exclude_topics=()):
         """Return at most ``top_n`` active memories matching query keywords."""
         try:
             limit = max(0, int(top_n))
@@ -347,8 +347,11 @@ class MemoryStore:
                 (now,),
             ).fetchall()
 
+        excluded = set(str(t).strip() for t in (exclude_topics or ()) if str(t).strip())
         ranked = []
         for row in rows:
+            if row["topic"] in excluded:
+                continue
             searchable = " ".join((row["key"], row["topic"], row["content"])).casefold()
             score = sum(token in searchable for token in query_tokens)
             if score:
@@ -466,11 +469,12 @@ def format_memory_context(records, *, max_chars=DEFAULT_CONTEXT_CHARS):
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def build_memory_context(query, store=None, *, top_n=DEFAULT_TOP_N, max_chars=DEFAULT_CONTEXT_CHARS):
+def build_memory_context(query, store=None, *, top_n=DEFAULT_TOP_N, max_chars=DEFAULT_CONTEXT_CHARS, exclude_topics=()):
     """Build optional prompt context; database errors fail open."""
     try:
         store = store or MemoryStore()
-        return format_memory_context(store.recall(query, top_n=top_n), max_chars=max_chars)
+        records = store.recall(query, top_n=top_n, exclude_topics=exclude_topics)
+        return format_memory_context(records, max_chars=max_chars)
     except Exception:
         return ""
 
@@ -479,8 +483,8 @@ def remember(*args, db_path=None, **kwargs):
     return MemoryStore(db_path).remember(*args, **kwargs)
 
 
-def recall(query, *, top_n=DEFAULT_TOP_N, db_path=None):
-    return MemoryStore(db_path).recall(query, top_n=top_n)
+def recall(query, *, top_n=DEFAULT_TOP_N, db_path=None, **kwargs):
+    return MemoryStore(db_path).recall(query, top_n=top_n, **kwargs)
 
 
 def forget(*, db_path=None, **kwargs):

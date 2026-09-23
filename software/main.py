@@ -227,7 +227,8 @@ def run(
             if debug:
                 command = f'livekit-server --dev --bind "{server_host}" --port {server_port}'
             else:
-                command = f'livekit-server --dev --bind "{server_host}" --port {server_port} > /dev/null 2>&1'
+                null_target = "> NUL 2>&1" if os.name == "nt" else "> /dev/null 2>&1"
+                command = f'livekit-server --dev --bind "{server_host}" --port {server_port} {null_target}'
             livekit_thread = threading.Thread(
                 target=run_command, args=(command,)
             )
@@ -271,7 +272,10 @@ def run(
             stop_reminders()
         for thread in threads:
             if thread.is_alive():
-                subprocess.run(f"pkill -P {os.getpid()}", shell=True)
+                if os.name == "nt":
+                    subprocess.run(f"taskkill /PID {os.getpid()} /T /F", shell=True)
+                else:
+                    subprocess.run(f"pkill -P {os.getpid()}", shell=True)
         os._exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)

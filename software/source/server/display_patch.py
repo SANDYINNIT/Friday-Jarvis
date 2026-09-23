@@ -28,7 +28,7 @@ def _snapshot_to_disk(image, label):
         directory = _si.save_screenshot_folder()
         path = os.path.join(
             directory,
-            f"{_time.strftime('%Y%m%d-%H%M%S')}_{re.sub(r'[^a-zA-Z0-9_-]+', '_', label)[:24]}.png",
+            f"{time.strftime('%Y%m%d-%H%M%S')}_{re.sub(r'[^a-zA-Z0-9_-]+', '_', label)[:24]}.png",
         )
         image.save(path, format="PNG")
         _si.scratchpad_note(

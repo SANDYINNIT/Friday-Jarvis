@@ -1,13 +1,13 @@
-"""Cloud-first TTS: Gemini 3.1 Flash TTS on both Gemini accounts.
+"""Local-first TTS: neural Edge voice, Gemini cloud fallback.
 
-Speak chain: gemini account 1 -> gemini account 2 -> local edge-tts voice.
-Gemini quotas are per-account AND per-model, so cloud speech uses its own
-bucket on the Brain/Vision accounts and never touches their chat/vision
-usage. Every output is converted to the same raw format (16-bit mono PCM,
-24 kHz) so RealtimeTTS plays one uniform stream no matter which stage won.
+Speak chain: local edge-tts voice (en-US-AriaNeural @ 1.0x) -> gemini
+account 1 -> gemini account 2. The local Microsoft neural voice is FRIDAY's
+stable human voice; Gemini is the backup when local synthesis is down.
+Every output is converted to the same raw format (16-bit mono PCM, 24 kHz)
+so RealtimeTTS plays one uniform stream no matter which stage won.
 
-Both cloud stages failing degrades silently to the existing local voice —
-FRIDAY NEVER goes mute.
+If the cloud stage fails after local, FRIDAY degrades silently to the
+existing local voice — FRIDAY NEVER goes mute.
 """
 
 import base64
@@ -39,8 +39,13 @@ GEMINI_TTS_VOICE = os.environ.get("FRIDAY_GEMINI_TTS_VOICE", "Sulafat")  # Gemin
 GEMINI_TTS_TIMEOUT = float(os.environ.get("FRIDAY_GEMINI_TTS_TIMEOUT", "45"))
 LOCAL_TTS_URL = os.environ.get("FRIDAY_TTS_SPEECH_URL", "http://localhost:5050/v1/audio/speech")
 LOCAL_TTS_MODEL = os.environ.get("FRIDAY_LOCAL_TTS_MODEL", "tts-1")
-# Karen-flavored local fallback voice (calm, warm American female).
-LOCAL_TTS_VOICE = os.environ.get("FRIDAY_LOCAL_TTS_VOICE", "en-US-AriaNeural")
+# en-IE-EmilyNeural: Sir's chosen FRIDAY voice — warm Irish female (a nod to
+# the character's Irish voice actress, Kerry Condon; JennyNeural is the
+# fallback experiment). Override: FRIDAY_LOCAL_TTS_VOICE.
+LOCAL_TTS_VOICE = os.environ.get("FRIDAY_LOCAL_TTS_VOICE", "en-IE-EmilyNeural")
+# Neural voices default to a calm 0.9x so FRIDAY reads relaxed and natural
+# (the edge-tts server's own default is 1.2x = rushed).
+LOCAL_TTS_SPEED = float(os.environ.get("FRIDAY_LOCAL_TTS_SPEED", "0.9"))
 SAMPLE_RATE = 24000
 
 _QUOTA_STATUS = (401, 402, 403, 429)
@@ -72,7 +77,12 @@ def _local_pcm(text):
             _audio_segment_cls = AudioSegment
         response = requests.post(
             LOCAL_TTS_URL,
-            json={"model": LOCAL_TTS_MODEL, "voice": LOCAL_TTS_VOICE, "input": text},
+            json={
+                "model": LOCAL_TTS_MODEL,
+                "voice": LOCAL_TTS_VOICE,
+                "input": text,
+                "speed": LOCAL_TTS_SPEED,
+            },
             timeout=30,
         )
         if response.status_code != 200 or not response.content:
@@ -139,18 +149,25 @@ def _synthesize(key, text, model):
 
 
 class CloudFirstTTSVoice:
-    """Speaks text cloud-first: gemini account 1 -> 2 -> local voice.
+    """Speaks text local-first: neural edge voice -> gemini 1 -> gemini 2.
 
-    The Gemini stage itself walks a per-model id chain (preview suffix
-    variants): quotas are per-account AND per-model, a 404 on one id must
-    not silence the whole account.
+    The Gemini fallback stage itself walks a per-model id chain (preview
+    suffix variants): quotas are per-account AND per-model, a 404 on one id
+    must not silence the whole account.
     """
 
     def speak(self, text):
-        """Speak cloud-first. Returns PCM bytes or None; records LAST_STAGE."""
+        """Speak local-first. Returns PCM bytes or None; records LAST_STAGE."""
         text = str(text or "").strip()
         if not text:
             return None
+        # Local neural voice is the PRIMARY voice: consistent, human-sounding,
+        # offline. Gemini only speaks when local synthesis is unavailable.
+        ok, pcm, _q, error = _local_pcm(text)
+        if ok:
+            self.LAST_STAGE = "local"
+            return pcm
+        print(f"[local tts] {error}", flush=True)
         quota_pool = api_pools.pool("gemini_tts")
         if quota_pool is not None and not quota_pool.empty:
             for model in GEMINI_TTS_MODEL_CHAIN:
@@ -175,13 +192,12 @@ class CloudFirstTTSVoice:
                         # proving it and let the next MODEL id take over.
                         api_pools.fail_model("gemini_tts", model)
                         break
-        ok, pcm, _quota, _error = _local_pcm(text)
-        self.LAST_STAGE = "local" if ok else "none"
-        return pcm if ok else None
+        self.LAST_STAGE = "none"
+        return None
 
 
 class CloudFirstTTSEngine:
-    """RealtimeTTS-compatible engine: Gemini 1 -> 2 -> local voice.
+    """RealtimeTTS-compatible engine: neural edge voice -> Gemini fallback.
 
     RealtimeTTS engines expose get_stream_info() + synthesize(text) pushing
     raw audio bytes into self.queue. All chain stages here output the SAME

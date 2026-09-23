@@ -40,7 +40,7 @@ Scenario failover that keeps the conversation flowing without drama:
 - Free-tier rate limits hit → silently rotate to the next key/model (Groq → OpenRouter → Gemini → local), never a 6-hour ban, never a canned apology.
 - Voice call in progress on Discord/WhatsApp/Telegram → FRIDAY stays completely quiet (`social_guard`).
 - Whisper hallucination → rejected before it ever reaches the brain (`speech_filters`).
-- Tool loop going in circles → detected and stopped (`loop_guard`).
+- Tool loop going in circles → detected and stopped (tool-cap loop guard).
 
 ## The student / maker's co-pilot
 

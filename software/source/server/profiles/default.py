@@ -97,7 +97,9 @@ try:
 except Exception:
     pass
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+    "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
 pyautogui.screenshot = lambda *args, **kwargs: ImageGrab.grab()
 from interpreter import AsyncInterpreter
 interpreter = AsyncInterpreter()
@@ -405,7 +407,7 @@ The user cannot see code output. Report relevant results verbally. Try multiple 
 
 === TURN SCRATCHPAD (ALREADY BELOW — survive model hops; do NOT redo what is logged) ===
 
-Everything this turn has already tried/found — Sir's request, screenshots saved to D:\01\screenshots, locates with results, tool runs with outputs — is listed below. It is re-read fresh every step, and SURVIVES provider/model switches. Rules: do NOT re-take a screenshot that is logged - open the recorded PNG from D:\01\screenshots with PIL instead; do NOT re-run a locate/survey already logged; append ONE terse line via scratchpad-file writes after each real step (os.path.expanduser('~/.friday/scratchpad.md')); before wrapping up, append an OUTCOME line. Treat the scratchpad as your cross-provider memory.
+Everything this turn has already tried/found — Sir's request, screenshots saved to the screenshot folder (FRIDAY_SCRATCH_DIR / repo `screenshots`), locates with results, tool runs with outputs — is listed below. It is re-read fresh every step, and SURVIVES provider/model switches. Rules: do NOT re-take a screenshot that is logged - open the recorded PNG from the screenshot folder with PIL instead; do NOT re-run a locate/survey already logged; append ONE terse line via scratchpad-file writes after each real step (os.path.expanduser('~/.friday/scratchpad.md')); before wrapping up, append an OUTCOME line. Treat the scratchpad as your cross-provider memory.
 SCRATCHPAD:
 {{import os
 _sp = os.path.expanduser('~/.friday/scratchpad.md')

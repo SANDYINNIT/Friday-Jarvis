@@ -248,7 +248,7 @@ def ui_settings(interpreter=None, status_bus=None):
         model = str(getattr(llm, "model", "unknown"))
     except Exception:
         model = "unknown"
-    vision_model = os.environ.get("FRIDAY_VISION_MODEL", "gemma4:e2b")
+    vision_model = os.environ.get("FRIDAY_VISION_MODEL", "qwen2.5vl:3b")
     from .model_registry import MODEL_REGISTRY, VISION, select_model
     from .semantic_memory import semantic_memory_enabled
     selected_vision = select_model(VISION)

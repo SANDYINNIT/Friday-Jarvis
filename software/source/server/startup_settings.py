@@ -24,11 +24,17 @@ def _startup_conhost():
 
 
 def _startup_python():
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".venv", "Scripts", "python.exe"))
+    """Interpreter used to spawn FRIDAY: the one already running this
+    process — works with or without a virtualenv."""
+    return sys.executable
 
 
 def _startup_pythonw():
-    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".venv", "Scripts", "pythonw.exe"))
+    """Windowless spawn variant: pythonw.exe next to the running interpreter
+    when it exists, otherwise the interpreter itself."""
+    exe = Path(sys.executable)
+    pythonw = exe.with_name(f"pythonw{exe.suffix}")
+    return str(pythonw) if pythonw.exists() else str(exe)
 
 
 def _startup_main():

@@ -18,7 +18,7 @@ The file schema is an object keyed by pool name, each value a list of keys:
       "deepgram":        ["f953..."]
     }
 
-See api_credentials.example.json for the ready-made template.
+See dot_friday\api_credentials.example.json for the ready-made template.
 """
 
 import json

@@ -131,6 +131,64 @@ def _handle_list_windows(text, actor):
             "allowed": True, "changed": False, "response": response}
 
 
+# "What is the user doing?" — instant read from the foreground window instead
+# of letting the brain author code that re-confirms "Roblox is running" 91 times.
+_ACTIVITY_RE = re.compile(
+    r"^(?:what(?:'?s|\s+is)?|do\s+you\s+know)\s+"
+    r"(?:the\s+|my\s+)?(?:user|sir|owner|sandy|boss|bro)\s+"
+    r"(?:currently|right\s+now|now|just|there)?\s*"
+    r"(?:doing|up\s+to|working\s+on|watching|playing|reading|using)\b"
+    r"|^(?:what\s+am\s+i|what(?:'?s|\s+is)\s+(?:me|i))\s+"
+    r"(?:currently|right\s+now|now|just)?\s*"
+    r"(?:doing|up\s+to|working\s+on|watching|playing|reading|using)\b"
+    r"|^(?:what(?:'?s|\s+is)?\s+going\s+on|what(?:'?s|\s+is)?\s+happening|"
+    r"whats?\s+happening|whats?\s+going\s+on)\b"
+    r"|^what(?:'?s|\s+is)?\s+happening\s+on\s+(?:the\s+)?(?:pc|computer|screen)\b"
+    r"|^what(?:'?s|\s+is|\s+are|'?re)?\s+(?:open|running|focused)"
+    r"(?:\s+right\s+now|\s+on\s+(?:the\s+)?(?:pc|computer))?\s*$"
+    r"|^(?:what|which)\s+(?:app|application|window|program|software)\s+"
+    r"(?:is|has|am)\s+(?:focused|active|open|running|up)\b"
+    r"|^is\s+(?:anyone|anyone\s+else)\s+(?:using|on)\s+(?:the\s+)?"
+    r"(?:pc|computer)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _handle_activity(text, actor):
+    if not _ACTIVITY_RE.search(_norm(text)):
+        return None
+    from .windows_context import get_active_window_context
+
+    active = None
+    try:
+        active = get_active_window_context()
+    except Exception:
+        active = None
+    if active and (active.get("title") or active.get("process")):
+        title = str(active.get("title") or "").strip()
+        proc = str(active.get("process") or "").strip()
+        label = title or proc
+        suffix = f" ({proc})" if proc and not label.lower().endswith(proc.lower()) else ""
+        response = f"Right now {label}{suffix} has focus — that's what you're looking at."
+    else:
+        try:
+            windows = list_windows(limit=8)
+        except Exception:
+            windows = []
+        titles = sorted({
+            str(w.get("title") or "").strip()
+            for w in (windows or []) if str(w.get("title") or "").strip()
+        })
+        if titles:
+            response = "Nothing has focus right now; these are the open windows: " + "; ".join(titles[:5]) + "."
+        else:
+            response = "The desktop looks idle — no foreground application is active."
+    log_action(actor=actor, risk=RISK_READ_ONLY, operation="what_is_user_doing",
+               outcome="ok", allowed=True, query=text)
+    return {"handled": True, "action": "what_is_user_doing", "risk": RISK_READ_ONLY,
+            "allowed": True, "changed": False, "response": response}
+
+
 def _handle_focus(text, actor):
     target = _focus_phrase(text)
     if target is None:
@@ -501,7 +559,7 @@ def route(text, *, actor="voice"):
         result = quoted_handler(text, actor=actor)
         if result is not None:
             return result
-    handlers = (_handle_list_windows, _handle_forbidden,
+    handlers = (_handle_list_windows, _handle_activity, _handle_forbidden,
                 _handle_minimize, _handle_focus, _handle_type, _handle_web_fetch,
                 _handle_browser, _handle_media, _handle_calendar, _handle_script)
     # Strip conversational prefixes ("okay perfect, ...") so the remaining

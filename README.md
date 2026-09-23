@@ -50,8 +50,8 @@ The flow is deliberately **forward-only failover**: when a provider errors or ra
 ## Requirements
 
 - **OS:** Windows 10/11 (Windows-only features are used throughout).
-- **Python 3.11** in a virtualenv (`software\.venv`).
-- **Poetry** for installing dependencies.
+- **Python 3.11** — a virtualenv is *optional*; FRIDAY runs against any plain Python 3.11 install.
+- **pip** (recommended) or **Poetry** for installing dependencies.
 - **Ollama** running locally with at least `qwen3:8b`:
   ```powershell
   ollama pull qwen3:8b
@@ -67,16 +67,18 @@ The flow is deliberately **forward-only failover**: when a provider errors or ra
 git clone <your-repo-url>
 cd <repo>\software
 
-# 2. Create the environment (the patched Open Interpreter wheel is pinned in pyproject.toml)
-python -m venv .venv
-.venv\Scripts\activate
-poetry install          # or: pip install -r requirements_freeze.txt
+# 2. Install dependencies into YOUR Python 3.11 — no virtualenv required.
+#    (A venv works too: create and activate one first if you want isolation —
+#    everything below then runs against `python` inside that venv.)
+pip install --no-deps -r requirements_freeze.txt
+#    The patched open-interpreter wheel installs from the relative tmp-oi\ path.
 
-# 3. Re-apply the 3 hand-patched Open Interpreter files from this repo
-#    (copy the matching files from site-packages-patches\ back into the venv):
-copy .\site-packages-patches\interpreter\core\computer\display\display.py      .venv\Lib\site-packages\interpreter\core\computer\display\
-copy .\site-packages-patches\interpreter\core\computer\display\friday_locate.py .venv\Lib\site-packages\interpreter\core\computer\display\
-copy .\site-packages-patches\interpreter\core\computer\vision\vision.py         .venv\Lib\site-packages\interpreter\core\computer\vision\
+# 3. Re-apply the 3 hand-patched Open Interpreter files from this repo into
+#    that same Python's site-packages (resolved automatically):
+$sp = & python -c "import sys; print(next(p for p in sys.path if p.endswith('site-packages')))"
+copy .\site-packages-patches\interpreter\core\computer\display\display.py      "$sp\interpreter\core\computer\display\"
+copy .\site-packages-patches\interpreter\core\computer\display\friday_locate.py "$sp\interpreter\core\computer\display\"
+copy .\site-packages-patches\interpreter\core\computer\vision\vision.py         "$sp\interpreter\core\computer\vision\"
 ```
 
 The patches replace Open Interpreter's broken remote `/point/` display API with FRIDAY's own local vision chain (`friday_locate.py`), so her "look at the screen / find X" commands work without a third-party service.
@@ -111,17 +113,20 @@ Everything starts from `software\main.py` (a `typer` CLI):
 ```powershell
 # Desktop launch — opens the HUD immediately
 cd software
-.\.venv\Scripts\python.exe main.py --status-ui
+python main.py --status-ui
 
 # Same thing via the convenience script
+# (uses .venv\Scripts\python.exe when present, otherwise the plain `python`)
 powershell -ExecutionPolicy Bypass -File .\start_friday.ps1
 ```
 
 **Hidden / auto-start (tray):**
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --status-ui --background
+python main.py --status-ui --background
 ```
+
+> Use **the same interpreter you installed dependencies into** everywhere above — `python` when you skipped the venv, or `activate` your venv first if you made one.
 
 `--background` boots FRIDAY silently into the system tray: the brain and Telegram run, the HUD stays hidden until you pick **Open App** from the tray icon. To auto-start at Windows login, use the **Settings** tab of the HUD (writes the registry `Run` key). `software\friday_boot.vbs` is the boot wrapper the registry entry invokes.
 
@@ -180,16 +185,15 @@ software\
         ├── self_improve.py   → lessons ledger injected live into each turn
         ├── reminders.py / schedule_store.py / note_taker.py / digest.py / proactive.py
         ├── remote_telegram.py → phone control (allowlisted)
-        ├── display_patch.py / kernel_display_patch.py → local vision chain for OI
+        ├── display_patch.py / → local vision chain for OI
         ├── screen_understanding.py / windows_control.py / ui_automation.py / web_scrape.py
         ├── focus_tracker.py / windows_context.py / desktop_ear.py / intent_judge.py
-        ├── social_guard.py / speech_filters.py / loop_guard.py / audit.py / redaction.py
+        ├── social_guard.py / speech_filters.py / audit.py / redaction.py
         ├── startup_settings.py / file_logger.py / persona_flair.py / status_ui.py
         ├── delegation.py / agent_coordinator.py / mcp_runtime.py / home_assistant.py (opt-in, off by default)
         ├── profiles\         → default.py (active) · fast.py · local.py · jarvis_persona.md
         ├── ui\               → HUD (index.html · app.js · style.css)
         ├── livekit\          → experimental LiveKit voice server
-        └── utils\            → small helpers (get_system_info)
 ```
 
 Supporting docs: `CONTEXT.md` (design philosophy), `ROADMAP.md` (what's planned), `USES.md` (use cases).
@@ -214,4 +218,4 @@ FRIDAY is highly configurable through environment variables (**`FRIDAY_*`**). Im
 
 ## License
 
-MIT — see `LICENSE`. (Third-party components keep their own licenses; see `pyproject.toml`.)
+**AGPL-3.0** — see `LICENSE`. (The project is a fork of the open-source **01** voice interface by Open Interpreter, itself AGPL-3.0. The vendored Open Interpreter fork ships under its own license — see `software/LICENSE`.)

@@ -20,7 +20,7 @@ The ambition of the *01* movement this is derived from: the most hackable assist
 
 ## 5. Be open-source
 
-Everything here is MIT-licensed and meant to be forked, learned from, and improved. Real API keys can't be (and aren't) part of the repository.
+Everything here is AGPL-3.0-licensed and meant to be forked, learned from, and improved (see `LICENSE`). Real API keys can't be (and aren't) part of the repository.
 
 ## Working rules (in force for every change)
 
@@ -28,7 +28,7 @@ Everything here is MIT-licensed and meant to be forked, learned from, and improv
 - **Protect the core.** The wake-word → STT → brain → tools → TTS loop must stay fast and reliable. Features are built on top of a healthy core, never at its expense.
 - **The brain authors the code.** App open/close/click flows go through Open Interpreter (the model writes and runs its own scripts), not through hard-coded trigger phrases. Deterministic routing stays deliberately small.
 - **Say what's true.** Tool output, failed screenshots, and internal reasoning are never spoken as if they were assistant thoughts.
-- **Never leak secrets.** Credentials never reach logs or transcripts (see `credential_stripper.py` / `redaction.py`).
+- **Never leak secrets.** Credentials never reach logs or transcripts (see `redaction.py`).
 
 ## Where this came from
 

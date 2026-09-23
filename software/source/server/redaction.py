@@ -83,8 +83,15 @@ def _redact_paths(text):
     return text
 
 
-def redact(text):
-    """Return ``text`` with sensitive shapes replaced by stable placeholders."""
+def redact(text, mask_paths=True):
+    """Return ``text`` with sensitive shapes replaced by stable placeholders.
+
+    ``mask_paths=False`` keeps real filesystem paths intact (used for
+    owner-bound phone replies where the owner needs the actual path — the
+    full masking would turn ``D:\\01\\...`` into ``<PATH>``, making answers
+    like "I'm working in D:\\01\\software" useless). Secrets (tokens, keys,
+    emails, cards, phone numbers, IPs) are ALWAYS masked either way.
+    """
     if not isinstance(text, str) or not text:
         return text
     if not redaction_enabled():
@@ -96,7 +103,8 @@ def redact(text):
     text = _CARD_RE.sub(lambda m: _mask(m, REDACTED_CARD), text)
     text = _KEY_RE.sub(lambda m: _mask(m, REDACTED_KEY), text)
     text = _TOKEN_RE.sub(lambda m: _mask(m, REDACTED_TOKEN), text)
-    text = _redact_paths(text)
+    if mask_paths:
+        text = _redact_paths(text)
     return text
 
 

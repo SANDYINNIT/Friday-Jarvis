@@ -29,7 +29,8 @@ def scratchpad_path():
 
 
 def scratchdir_path():
-    return os.getenv("FRIDAY_SCRATCH_DIR", r"D:\01\screenshots")
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    return os.getenv("FRIDAY_SCRATCH_DIR", os.path.join(root, "screenshots"))
 
 
 def scratchpad_reset():

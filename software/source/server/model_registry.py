@@ -35,6 +35,9 @@ MODEL_REGISTRY = (
     ModelInfo("qwen3:8b", "ollama", "local", frozenset({GENERAL, CODING, REASONING, "TOOLS"}), 10, "medium", "medium"),
     ModelInfo("llama3.2:3b", "ollama", "local", frozenset({FAST}), 10, "low", "fast"),
     ModelInfo("qwen2.5-coder:7b", "ollama", "local", frozenset({CODING}), 10, "medium", "medium"),
+    # Real local vision: gemma4:e2b is NOT multimodal (see MEMORY.md 2026-09-23)
+    # and was a phantom vision slot; qwen2.5vl:3b actually describes frames.
+    ModelInfo("qwen2.5vl:3b", "ollama", "local", frozenset({VISION}), 5, "low", "medium"),
     ModelInfo("gemma4:e2b", "ollama", "local", frozenset({VISION}), 10, "high", "slow", True),
     ModelInfo("rafw007/gemma4-e2b-claude-coder:latest", "ollama", "local", frozenset({VISION, CODING}), 20, "high", "slow", True),
     ModelInfo("gemini-3-flash-preview:latest", "ollama", "cloud", frozenset({VISION, EXTERNAL}), 30, "medium", "medium"),

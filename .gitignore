@@ -9,6 +9,7 @@ __pycache__/
 .friday/
 dot_friday/api_credentials.json
 *.db
+*.log
 
 # OS/editor
 .DS_Store
