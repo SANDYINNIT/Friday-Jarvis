@@ -93,7 +93,7 @@ def run_default_diagnostics(flog, software_root):
     errors = _recent_error_log()
     error_note = f", and I counted {len(errors)} recent warnings in my log" if errors else ""
     git = _uncommitted_git(software_root)
-    git_note = f" Also, {len(git)} file{'s' if len(git) != 1 else ''} in D:\\01\\software are uncommitted." if git else ""
+    git_note = f" Also, {len(git)} file{'s' if len(git) != 1 else ''} in the software tree are uncommitted." if git else ""
     return f"Welcome back, Sir. I scanned things while you were away — {ram_line} are using the most memory, system load feels normal{error_note}.{git_note}"
 
 

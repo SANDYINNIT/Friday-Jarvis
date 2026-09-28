@@ -1,12 +1,17 @@
 ﻿"""Per-turn Brain routing: tier classification + model/pool selection.
 
-Tiers run the weakest appropriate model first and escalate only when the
-message demands it:
-  - normal:     gpt-oss-20b on Groq                      (keys 5-8)
-  - hard:       gpt-oss-120b on Groq                     (keys 5-8)
-  - deep:       Gemini flash-lite                        (key 1, high-value work)
-Fallback order is always: chosen tier -> Groq -> OpenRouter -> Gemini -> local
-qwen3:8b. A spoken override ("use your strongest model") forces the deep tier.
+Cloud-first routing for every tier (2026-09-28, Sir's decision after the
+hybrid's local-for-tools leg backfired: slow local qwen3 prefill + the
+wrong-app GUI-truthfulness bug):
+  - normal/casual chat AND hard/task-tool work share one cloud-first chain:
+    groq fast (gpt-oss-20b) -> groq strong -> gemini chain -> openrouter
+    chain -> local qwen3:8b as the COMPLETE fallback.
+  - deep  (explicit "use gemini"/strongest): gemini chain first ->
+    groq strong -> openrouter -> local.
+Mid-turn storm guard: once a tool row exists in interpreter.messages this
+turn, failover only ever lands back on local (no cross-cloud hop that
+forgets what already ran) - this is what keeps cloud-held tool turns safe.
+A spoken override ("use your strongest model") forces the deep tier.
 """
 
 import os
@@ -101,6 +106,21 @@ HARD_TRIGGERS = [
     r"github\.com/",
 ]
 
+# Imperative action/tool requests route LOCAL-first (deterministic offline
+# tool path; free-tier cloud 429 mid-turn hops historically re-ran tools to
+# the loop cap). Conservative on purpose: clear app/system/command verbs and
+# explicit "do this now" phrasing only, so casual chat stays cloud-first.
+TOOL_TASK_TRIGGERS = [
+    r"^(?:please\s+|can\s+you\s+|could\s+you\s+|go\s+ahead\s+and\s+)?(?:open|close|launch|start|stop|kill|terminate|shutdown|restart|click|install|uninstall|set up|play|pause|download|delete|move|copy|rename|create|save|take a screenshot|scan|type|press|mute|unmute)\b",
+    r"\binstall\b",
+    r"\buninstall\b",
+    r"\b(?:open|launch|start|close|stop|kill|terminate)\s+(?:the\s+)?[a-z0-9_.-]+\s+(?:app|application|program|window|file|folder|tab|site|website|url|browser)\b",
+    r"\bclick\s+(?:on\s+)?(?:the\s+)?[a-z0-9_-]+\s+(?:button|icon|link|tab|menu)\b",
+    r"\btake\s+a\s+screenshot\b",
+    r"\bset\s+(?:the\s+)?volume",
+    r"\bwrite\s+(?:a|an|the|this)\s+(?:python|script|program|file|function|class)\b",
+]
+
 _REDUCED = re.compile(r"(redacted)", re.IGNORECASE)
 
 _KEY_ERROR_MARKERS = (
@@ -167,14 +187,19 @@ def classify(user_text):
         return "deep"
     if any(re.search(pattern, lowered) for pattern in HARD_TRIGGERS):
         return "hard"
+    if any(re.search(pattern, lowered) for pattern in TOOL_TASK_TRIGGERS):
+        return "hard"
     return "normal"
 
 
 def resolve(user_text):
     """Ordered candidates (pool_name, model, api_base) for a message.
 
-    Fallback order: chosen tier -> Gemini model chain (per-model quota
-    buckets, 1M TPM free) -> OpenRouter free-model chain -> local.
+    Cloud-first for every tier (see module docstring): chat and task/tool work
+    both start on the fast cloud chain with local qwen3:8b as the complete
+    fallback (safe: apply_for() storm guard locks any post-tool failover onto
+    LOCAL, so mid-turn hops cannot re-run tools cross-provider). Explicit
+    strongest-model requests start on the Gemini chain.
     """
     tier = classify(user_text)
     gemini_candidates = [
@@ -185,13 +210,19 @@ def resolve(user_text):
     ]
     chosen = []
     if tier == "deep":
-        chosen = list(gemini_candidates)
-    elif tier == "hard":
-        chosen = [("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE)]
-    else:
-        chosen = [("brain_groq", GROQ_FAST_MODEL, GROQ_BASE)]
+        # Explicit strongest-model request: Gemini chain first, then Groq
+        # strong, local as the dependable fallback.
+        chosen = [
+            *gemini_candidates,
+            ("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE),
+        ]
+    # else normal / hard / task-tool: nothing pre-chosen -> cloud chain fills
+    # in below (groq fast first) and "local" is appended as the complete
+    # fallback, for ALL turns. Tool work is no longer local-first: the
+    # storm guard in apply_for() keeps cross-provider tool re-runs bounded.
     for candidate in [
         ("brain_groq", GROQ_FAST_MODEL, GROQ_BASE),
+        ("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE),
         *gemini_candidates,
         *openrouter_candidates,
     ]:
@@ -261,8 +292,34 @@ class BrainRouter:
         model_name = None
         pool_name_selected = None
         if self._enabled:
+            # Mid-turn storm guard: if a tool/computer row already appeared
+            # AFTER the turn's user message, refuse to hop across cloud
+            # providers (a mid-turn cloud 429 used to send the hop target
+            # re-running already-done tools until the loop cap). Failover can
+            # only land back on local, which sees the same completed work.
+            _tool_this_turn = False
+            try:
+                for _m in reversed(interpreter.messages):
+                    if _m.get("role") == "user":
+                        break
+                    if _m.get("role") in ("computer", "tool"):
+                        _tool_this_turn = True
+                        break
+            except Exception:
+                _tool_this_turn = False
             for pool_name, model, base in resolve(user_text):
+                if _tool_this_turn and pool_name != "local":
+                    continue
                 if pool_name == "local":
+                    # Local is the primary but must remain FAILOVER-ABLE: once
+                    # it failed this turn it is skipped so the cloud chain can
+                    # take over instead of re-sticking to a dead local brain.
+                    if self._turn_skip("local", None):
+                        continue
+                    self._configure(interpreter, None, LOCAL_BASE, None)
+                    model_name = LOCAL_MODEL
+                    pool_name_selected = "local"
+                    ticket = ("local", None, LOCAL_MODEL)
                     break
                 # Per-account-per-model quotas: a model-banned gemini stage
                 # entry means "this model's bucket is hot" â€” try the next
@@ -353,6 +410,8 @@ class BrainRouter:
             self._current_pool = None
             self._current_model = None
             self._current_tier = None
+        if pool_name == "local":
+            return  # no quota pool/cooldown bookkeeping for the local brain
         quota_pool = api_pools.pool(pool_name)
         if quota_pool is not None:
             quota_pool.succeed(key)
@@ -387,7 +446,7 @@ class BrainRouter:
             api_pools.fail_model(pool_name, model, cooldown=300.0)
             return
         model_level = pool_name == "brain_gemini" or (
-            pool_name == "brain_openrouter" and self._reason_kills_model(reason_text)
+            pool_name == "brain_openrouter" and _reason_kills_model(reason_text)
         ) or (pool_name == "brain_groq" and "parse tool call" in reason_text.lower())
         if model_level:
             # Gemini quotas AND stale OpenRouter slugs (404 unavailable-for-
@@ -433,15 +492,19 @@ class BrainRouter:
             llm.api_key = key
             
             # OI dispatches tool calling on llm.supports_functions (llm.py:320)
-            # â€” NOT supports_function_calling. Cloud turns must run through
-            # run_tool_calling_llm so the request carries `tools` +
-            # `tool_choice=auto`; otherwise Groq's gpt-oss aborts mid-stream
-            # with "Tool choice is none, but model called a tool".
-            # Local qwen3:8b keeps the stabilized markdown code-block path.
-            if not local:
-                llm.supports_functions = True
-                llm.supports_function_calling = True
-                llm.tool_choice = "auto"
-                print(f"[brain router] configured {model} with tool_choice=auto", flush=True)
+            # — NOT supports_function_calling — so tool-capable candidates must
+            # run through run_tool_calling_llm, which sends `tools` +
+            # `tool_choice=auto`. Cloud AND local qwen3:8b (natively
+            # tool-calling) both use it; the old markdown code-block path let
+            # qwen3 REPLY about actions instead of executing them (fabricated
+            # "I opened Notepad" with zero code run — live-verified 2026-09-28).
+            llm.supports_functions = True
+            llm.supports_function_calling = True
+            llm.tool_choice = "auto"
+            print(
+                f"[brain router] configured "
+                f"{LOCAL_MODEL if local else model} with tool_choice=auto",
+                flush=True,
+            )
         except Exception as error:
             print(f"[brain router] configure error: {api_pools.sanitize(error)}", flush=True)

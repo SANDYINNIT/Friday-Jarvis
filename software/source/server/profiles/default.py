@@ -322,6 +322,14 @@ output = interpreter.computer.run(
     "python", setup_code
 )
 interpreter.auto_run = True
+# Loop engine = multi-step chaining: after a text answer the model is nudged
+# to keep going (executes follow-up tools). UNBOUNDED it spins ~50 identical
+# requests when the model never emits a loop-breaker phrase (local qwen3
+# never does). FRIDAY keeps loop=True but caps it with the per-turn llm-call
+# loop guard in server.py traced_completions: plain-text replies end the turn
+# immediately when no tool has run (no duplicative merge); text-only spins after
+# tool work break at FRIDAY_LLM_LOOP_GUARD (default 2). Legit tool chains
+# (computer:console last message) are never capped.
 interpreter.loop = True
 interpreter.loop_message = """Continue only when the user's task is unfinished. If the task is complete, stop immediately. Do not repeat acknowledgements. Do not ask what to do next."""
 
@@ -351,6 +359,8 @@ INSTALL COURTESY: before pip-installing any package, or installing any system to
 
 When the user asks you to check, measure, open, inspect, or change something, always use the available computer API first before answering. Never claim an action was completed or that you checked a current value unless a tool result actually confirms it. If the tool fails, say so plainly. Do not say "I'll check" and then not check. Do not acknowledge a request without executing it.
 
+ACTION REQUESTS MUST EXECUTE: If the user asks you to open/close/kill an app, alter a file, run a command, or otherwise CHANGE the machine, your FIRST reply to that turn must be a real tool call or an executable code block that performs the action — never a plan, promise, or description pretending it is done. A spoken summary may only come AFTER the tool result confirms the action.
+
 Do not end responses with "What would you like to do next?" or similar repetitive closings. After answering a question, stop. Do not append invitations to continue.
 
 === SECURITY ===
@@ -367,7 +377,23 @@ Use silent_search(query) for web searches instead of opening a browser. It is al
 
 === WINDOWS WORKFLOWS ===
 
-Always take a screenshot with computer.display.view() before clicking or typing. Never guess coordinates. Use verified executable paths to open apps; fall back to Windows key search if needed.
+TO OPEN AN APP: LAUNCH IT, DO NOT CLICK FOR IT. Resolve the executable and start it with python — that IS the open action. Try in order:
+    1. `from windows_control import find_app_executable; exe = find_app_executable("calculator")` then os.startfile(exe) (or subprocess.Popen([exe]))
+    2. locate+launch: `subprocess.Popen(["powershell", "-NoProfile", "-Command", "Get-StartApps | Where-Object {$_.Name -match 'calculator'} | Select-Object -First 1 -ExpandProperty AppID | ForEach-Object {Start-Process \"shell:AppsFolder\\$($_)\"}"])`
+    3. protocol/URI: `subprocess.Popen(["cmd", "/c", "start", "calculator:"])`, else where.exe/Get-Command the exe name.
+NEVER open an app by hunting its icon on screen — display.find/find_text/click are for operating an ALREADY-OPEN window, not for launching. After launching, verify ONCE (Get-Process / is_app_running) then answer.
+
+=== CLICKING / UI OPERATION (if you DO operate an existing window or desktop) ===
+    1. Put the target in front FIRST: to reach the desktop, press Win+D (computer.keyboard.hotkey("win", "d")) or minimize_all; never click for an icon that is covered by other windows.
+    2. THEN take a screenshot (computer.display.view()) and READ it. If the target text/icon is NOT visible in the screenshot, do NOT click anything — say so honestly and use the LAUNCH path above instead.
+    3. Click only the coordinates find_text/find actually returned (they are absolute pixels: x,y in [0, screenWidth/Height]). If finder returns [] or an error, pivot — do not retry the same call; never click blind coordinates.
+    4. After the click, take ONE verification screenshot/check the process state before claiming success. Never claim "opened/clicked" from intent.
+
+Always take a screenshot with computer.display.view() before clicking or typing. Never guess coordinates.
+
+WMIC IS NOT INSTALLED on this machine (Windows 11 24H2+ removed it) — NEVER call wmic or wbem tools; they exit with code 1 and produce nothing. For system/process info use PowerShell equivalents: Get-CimInstance Win32_Processor / Get-Process / tasklist, and winreg for registry reads.
+
+NEVER kill your own assistant process. Do not run taskkill /IM python.exe, taskkill /PID <your process>, Stop-Process -Name python, or any kill targeting the python.exe that hosts you. When Sir asks to close an app, resolve the EXACT target PID (Get-Process <name> | Select-Object Id, ProcessName), confirm it is NOT the assistant, then Stop-Process that PID only.
 
 The computer module is already imported. Do not import it again.
 

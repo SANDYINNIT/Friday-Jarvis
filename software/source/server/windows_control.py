@@ -824,6 +824,11 @@ def close_app(app_name):
         images = [row[0].strip() for row in rows if row]
 
         def kill(image):
+            # Hard guard: never nuke the interpreter itself or any Python host.
+            # "close python/close the assistant" must never taskkill /IM
+            # python*.exe (that killed FRIDAY's own process in the field).
+            if image.lower() in ("python.exe", "pythonw.exe"):
+                return False
             outcome = subprocess.run(
                 ["taskkill", "/IM", image, "/F"],
                 capture_output=True, text=True, timeout=15,

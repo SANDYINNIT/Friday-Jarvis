@@ -342,28 +342,39 @@ def _handle_web_fetch(text, actor, max_report=420):
 
 
 def _handle_browser(text, actor):
-    quoted_search = re.search(
-        r"\bsearch\s*(?:in\s+a\s+new\s+tab\s*|for\s+)?[\"'\u201c]?([\w\d .,!?\-']{2,120})",
-        text,
-        flags=re.IGNORECASE,
-    ) if "search" in text.lower() else None
-    if quoted_search and ("\"" in text or "'" in text or "\u201c" in text):
-        # 'open edge and in a new tab search "how are you"' -> open the
-        # default browser at the google search for the quoted term.
-        from urllib.parse import quote_plus
+    quoted = "\"" in text or "'" in text or "\u201c" in text
+    if "search" in text.lower():
+        if quoted:
+            search_match = re.search(
+                r"\bsearch\s*(?:up\s+|in\s+a\s+new\s+tab\s*|for\s+)?[\"'\u201c]?([\w\d .,!?\-']{2,120})",
+                text, flags=re.IGNORECASE)
+        else:
+            # Bare (unquoted) search intents need an explicit follow-verb
+            # (for/up/in a new tab) so phrases merely containing the word
+            # "search" (e.g. a file named "...search results.xlsx") are not
+            # hijacked into a google open.
+            search_match = re.search(
+                r"\bsearch\s+(?:for\s+|up\s+|in\s+a\s+new\s+tab\s*(?:for\s+)?)[\"']?([\w\d .,!?\-']{2,120})",
+                text, flags=re.IGNORECASE)
+        if search_match:
+            # 'open google and search for youtube' or search "how are you" ->
+            # open the default browser at the google search for the term(s);
+            # trailing punctuation is trimmed.
+            from urllib.parse import quote_plus
 
-        query = quoted_search.group(1).strip().strip("\"'\u201c\u201d ")
-        if len(query) >= 2:
-            import webbrowser
+            query = search_match.group(1).strip().strip(" \t.\"'\u201c\u201d,;!?")
 
-            url = f"https://www.google.com/search?q={quote_plus(query)}"
-            webbrowser.open(url)
-            log_action(actor=actor, risk=RISK_READ_ONLY, operation="web_search",
-                       allowed=True, outcome="ok", query=_redact(query))
-            return {"handled": True, "action": "web_search", "risk": RISK_READ_ONLY,
-                    "allowed": True, "changed": True,
-                    "response": _flair.browser(f"the search for \u201c{query}\u201d"),
-                    "url": url}
+            if len(query) >= 2:
+                import webbrowser
+
+                url = f"https://www.google.com/search?q={quote_plus(query)}"
+                webbrowser.open(url)
+                log_action(actor=actor, risk=RISK_READ_ONLY, operation="web_search",
+                           allowed=True, outcome="ok", query=_redact(query))
+                return {"handled": True, "action": "web_search", "risk": RISK_READ_ONLY,
+                        "allowed": True, "changed": True,
+                        "response": _flair.browser(f"the search for \u201c{query}\u201d"),
+                        "url": url}
     match = _BROWSER_RE.search(text)
     if not match:
         return None

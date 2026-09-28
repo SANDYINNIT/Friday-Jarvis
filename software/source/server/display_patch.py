@@ -22,7 +22,7 @@ from . import self_improve as _si
 
 
 def _snapshot_to_disk(image, label):
-    """Persist the capture to D:\\01\\screenshots (pruned) so later agents
+    """Persist the capture to the screenshot folder (FRIDAY_SCRATCH_DIR / repo `screenshots`, pruned) so later agents
     can REUSE it instead of re-shooting the screen. Returns path or None."""
     try:
         directory = _si.save_screenshot_folder()
@@ -109,8 +109,64 @@ def _locate_via_vision(description, screenshot=None):
     )
 
 
+def _ensure_mouse_pixel_contract():
+    """Boot-time self-heal: FRIDAY's display.find/find_text return ABSOLUTE
+    PIXEL coordinates, but upstream OI's computer/mouse/mouse.py expects
+    normalized (0..1) and multiplies by display.width/height — a click on an
+    icon found at (1116, 192) becomes (2,142,720, ...), i.e. off-screen. If
+    the site-packages mouse.py lost the FRIDAY marker (wheel reinstall,
+    pip upgrade, fresh .venv), re-apply the pixel-contract edits in place."""
+    marker = "FRIDAY patch: our finders return ABSOLUTE PIXEL coordinates"
+    try:
+        from pathlib import Path as _Path
+        import re as _re
+        import importlib.util as _ilu
+
+        spec = _ilu.find_spec("interpreter.core.computer.mouse.mouse")
+        if spec is None or spec.origin is None:
+            return
+        path = _Path(spec.origin)
+        text = path.read_text(encoding="utf-8")
+        if marker in text:
+            return
+        new = _re.sub(
+            r"^\s{12,}x \*= self\.computer\.display\.width\s*\n\s*y \*= self\.computer\.display\.height\s*\n",
+            "",
+            text,
+            flags=_re.M,
+        )
+        # icon branch: find() returns dicts, not bare (x, y) tuples
+        new = _re.sub(
+            r"x, y = item(?=\n)",
+            "x, y = item[\"coordinates\"]",
+            new,
+        )
+        new = _re.sub(
+            r"x, y = coordinates\[0\]\s*\n",
+            "x, y = coordinates[0][\"coordinates\"]\n",
+            new,
+        )
+        if new != text:
+            anchor = 'plt = lazy_import("matplotlib.pyplot")'
+            if anchor in new:
+                new = new.replace(
+                    anchor,
+                    anchor
+                    + "\n\n# FRIDAY patch: our finders return ABSOLUTE PIXEL coordinates; mouse.py\n# must NOT multiply them by display.width/height (enforced at boot by\n# _ensure_mouse_pixel_contract in server/display_patch.py).",
+                    1,
+                )
+            path.write_text(new, encoding="utf-8")
+            print(
+                "[display helpers] mouse.py pixel-contract re-applied (was upstream)",
+                flush=True,
+            )
+    except Exception as heal_error:  # never break interpreter boot
+        print(f"[display helpers] mouse self-heal skipped: {heal_error}", flush=True)
+
+
 def install_display_helpers(interpreter):
     """Patch computer.display.find / find_text on the live interpreter."""
+    _ensure_mouse_pixel_contract()
     display = interpreter.computer.display
     if getattr(display, "_friday_patched", False) is True:
         return

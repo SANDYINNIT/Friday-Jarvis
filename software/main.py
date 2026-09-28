@@ -6,6 +6,7 @@ import os
 import importlib
 from source.server.server import start_server
 import subprocess
+import shutil
 import webview
 import socket
 import json
@@ -198,6 +199,15 @@ def run(
             light_server_host = server_host
             voice = True
         elif server == "livekit":
+            if shutil.which("livekit-server") is None:
+                print(
+                    "The `livekit-server` executable was not found on PATH. FRIDAY "
+                    "needs it for `--server livekit` (it is NOT installed by pip). "
+                    "Download it from https://github.com/livekit/livekit/releases "
+                    "(e.g. livekit_1.13.7_windows_amd64.zip on Windows), extract it, "
+                    "and put it on PATH. Or start FRIDAY with `--server light`."
+                )
+                exit(1)
             print(f"Starting light server (required for livekit server) on localhost, on the port before `--server-port` (port {server_port-1}), unless the `AN_OPEN_PORT` env var is set.")
             print(f"The livekit server will be started on port {server_port}.")
             light_server_port = os.getenv('AN_OPEN_PORT', server_port-1)
@@ -270,12 +280,12 @@ def run(
         stop_reminders = getattr(interpreter, "stop_reminders", None)
         if stop_reminders is not None:
             stop_reminders()
-        for thread in threads:
-            if thread.is_alive():
-                if os.name == "nt":
-                    subprocess.run(f"taskkill /PID {os.getpid()} /T /F", shell=True)
-                else:
-                    subprocess.run(f"pkill -P {os.getpid()}", shell=True)
+        # Graceful exit ONLY. Root-caused 2026-09-28: this handler previously
+        # ran `taskkill /PID <self> /T /F` whenever any thread was alive, which
+        # fire-bombed FRIDAY's ENTIRE process tree (supervising cmd too) with
+        # zero traceback, exit -1 and no OS events -- the "mystery killer" that
+        # deleted FRIDAY repeatedly and silently. Signals CAN arrive spuriously
+        # during boot, so we just exit; the supervised launcher restarts her.
         os._exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)

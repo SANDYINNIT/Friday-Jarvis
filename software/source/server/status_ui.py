@@ -971,7 +971,7 @@ class WebviewBridge:
         })
 
         # 12/13. Cloud-first TTS: Gemini on both accounts, then local voice.
-        tts_model = "gemini-3.1-flash-tts-preview / gemini-3.1-flash-tts"
+        tts_model = "gemini-3.1-flash-tts-preview"
         tts_voice = "Sulafat"
         try:
             from . import gemini_tts as _gt
@@ -1063,7 +1063,7 @@ def run_status_window(status_bus, interpreter=None, start_hidden=False):
                     tray_console["proc"] = _sub.Popen(
                         [
                             "powershell", "-NoExit", "-Command",
-                            "Get-Content -Path", f"'{str(_log_path())}'",
+                            "Get-Content -Encoding UTF8 -Path", f"'{str(_log_path())}'",
                             "-Wait", "-Tail", "60",
                         ],
                         creationflags=0,
@@ -1085,8 +1085,18 @@ def run_status_window(status_bus, interpreter=None, start_hidden=False):
                     pass
 
         def tray_on_exit():
+            # Tell the start_friday.ps1 supervisor this was an INTENTIONAL stop
+            # so it disarms the auto-relaunch loop instead of bringing FRIDAY
+            # right back. Then hard-exit (there is no graceful downs-instance).
             import os as _os
 
+            try:
+                _stop = _os.path.join(_os.path.expanduser("~"), ".friday", "stop_friday.flag")
+                _os.makedirs(_os.path.dirname(_stop), exist_ok=True)
+                with open(_stop, "w", encoding="utf-8") as _f:
+                    _f.write("tray exit - intentional stop")
+            except Exception:
+                pass
             _os._exit(0)
 
         from .startup_settings import start_tray

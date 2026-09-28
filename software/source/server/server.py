@@ -1,3 +1,4 @@
+from fastapi import Request
 from fastapi.responses import PlainTextResponse
 from RealtimeSTT import AudioToTextRecorder
 from RealtimeTTS import TextToAudioStream
@@ -52,6 +53,8 @@ from . import brain_router as _brain_router_module
 os.environ["INTERPRETER_REQUIRE_ACKNOWLEDGE"] = "False"
 os.environ["INTERPRETER_REQUIRE_AUTH"] = "False"
 
+TEXT_CHANNEL_CHAT_ID = "@text-channel"
+
 def emit_input_terminal(output_queue):
     """Release a light client whose audio request failed before dispatch."""
     output_queue.sync_q.put({"ignored": True, "end": True})
@@ -78,8 +81,11 @@ def _reminders_enabled(interpreter):
 
 def _begin_single_turn(interpreter, server_state, *, user="", source=None):
     if server_state.get("single_turn_loop") is None:
-        server_state["single_turn_loop"] = getattr(interpreter, "loop", False)
-        interpreter.loop = False
+        server_state["single_turn_loop"] = getattr(interpreter, "loop", True)
+        interpreter.loop = server_state["single_turn_loop"]
+    # Multi-step chaining runs with the loop engine ON but SAFE: server.py's
+    # per-turn llm-call loop guard (traced_completions, FRIDAY_LLM_LOOP_GUARD)
+    # force-breaks any text-only repeat loop instead of letting it spin.
     _begin_turn_log(server_state, user=user, source=source)
 
 
@@ -98,7 +104,7 @@ def _redact_text(value):
 def _redact_for_phone(value):
     """Owner-bound Telegram replies: mask ONLY genuine secrets (tokens, keys,
     emails, cards, phones, IPs) but KEEP real filesystem paths. The full
-    redact() turns ``D:\\01\\software`` into ``<PATH>``, which made SR's
+    redact() turns ``C:\\work\\project`` into ``<PATH>``, which made SR's
     honest path answers arrive as literal "<PATH>" on the phone."""
     text = str(value or "")
     return _redact(text, mask_paths=False) if text else ""
@@ -462,6 +468,7 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
         "pending_router_response": None,
         "schedule_store": _ScheduleStore(),
         "telegram_capture": None,
+        "turn_channel": "",  # originating out-channel for /chat ("text"), telegram chat_id, or "" (local)
         "telegram_turn_mute": False,
         "turn_log": None,
         "pending_user_text": None,
@@ -711,11 +718,121 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
     # instead of letting it loop for dozens of executions (Roblox loop: 91 runs).
     HARD_TOOL_CAP = int(float(os.getenv("FRIDAY_HARD_TOOL_CAP", "24")))
 
+    # Pure conversational openers. When the user only greets/chats, the first
+    # text reply IS the answer — the loop-engine merge would just echo it back.
+    # Task/action requests are NOT openers, so they keep the one-merge nudge
+    # (lets a polite "ok, let me …" first line rebound into an actual tool call).
+    _chat_opener_re = re.compile(
+        r"""^\W{0,16}(hi\b|hello\b|hey\b|yo\b|howdy\b|greetings\b|wassup\b|"""
+        r"""sup\b|good\s+(morning|afternoon|evening|day|night)\b|"""
+        r"""thanks\b|thank\s+you\b|thanks\s+a\s+lot\b|nice\s+to\s+meet\b|"""
+        r"""how\s+are\s+(you|y'all|ya)\b|how'?s\s+it\s+going\b|how'?s\s+your\s+day\b|"""
+        r"""say\s+(hi|hello|hey)\b|who\s+are\s+you\b|are\s+you\s+(there|awake)\b|"""
+        r"""what'?s\s+up\b|what\s+is\s+up\b|you?\s+there\b|wake\s+up\b)""",
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    def _chat_opener(user_text):
+        if not isinstance(user_text, str):
+            return False
+        return bool(_chat_opener_re.match(user_text.strip()))
+
+    def _strip_user_request_prefix(user_text):
+        # dispatch_text may prefix memory context: "<ctx>\n\nUser request:\n<text>".
+        marker = "\n\nUser request:\n"
+        if isinstance(user_text, str) and marker in user_text:
+            return user_text.split(marker, 1)[1]
+        return user_text or ""
+
     if not getattr(interpreter.llm, "_friday_trace_wrapped", False):
         original_completions = interpreter.llm.completions
+        # Per-turn guard: OI's loop-message engine (respond.py else-branch)
+        # re-invokes the LLM when the last message is plain assistant text —
+        # querying a model that never emits a loop-breaker phrase spins
+        # ~50 identical requests. FRIDAY (a) ends a plain-text reply immediately
+        # when no tool has run yet (the first text answer IS the answer — no
+        # duplicative merge), and (b) force-breaks any text-only spin that
+        # persists after tool activity. Tool steps have computer:console last,
+        # so they never count against the cap.
+        llm_loop_guard = {"calls": 0}
+        LOOP_GUARD_CAP = int(float(os.getenv("FRIDAY_LLM_LOOP_GUARD", "2")))
 
         def traced_completions(**params):
             trace("llm_request_start")
+            # qwen3 thinking mode is ON by default in Ollama and, when allowed,
+            # adds tens of seconds of silent reasoning to every trivial reply
+            # (measured: ~38s vs ~2.7s on the real persona prompt). Enforce
+            # think=false here at the FRIDAY-owned chokepoint so it survives
+            # OI/litellm version updates (llm.py:435 only lives in some copies).
+            if isinstance(params.get("model"), str) and params["model"].split("/")[-1].startswith("qwen3"):
+                params["think"] = False
+                trace("llm_brain_think_off")
+            _last = interpreter.messages[-1] if interpreter.messages else {}
+            if _last.get("role") == "user":
+                llm_loop_guard["calls"] = 0
+                tool_counter["n"] = 0  # per-turn tool budget (fixes lifetime accumulation)
+            llm_loop_guard["calls"] += 1
+            _assistant_text = _last.get("role") == "assistant" and _last.get("type") in (None, "message")
+            if _assistant_text and llm_loop_guard["calls"] >= 2:
+                # respond() wants to re-merge a plain-text assistant reply. Skip
+                # the merge when NO tool has run yet AND the user's request was a
+                # conversational opener: the first text reply IS the answer, so a
+                # merge only dumps a duplicative greeting. Task requests keep the
+                # merge so a polite first line can still rebound into a tool call.
+                # Tool turns always have computer:console last, so they never hit
+                # this branch.
+                has_tool_activity = False
+                _user_text = ""
+                for m in reversed(interpreter.messages):
+                    if m.get("role") == "user":
+                        _user_text = m.get("content") or ""
+                        break
+                    if m.get("role") in ("computer", "tool"):
+                        has_tool_activity = True
+                        break
+                if not has_tool_activity and _chat_opener(_strip_user_request_prefix(_user_text)):
+                    _flog.info(
+                        "llm loop guard: conversational reply, no tool ran — ending turn (calls=%d)",
+                        llm_loop_guard["calls"],
+                    )
+                    trace("llm_loop_guard_plain_end")
+                    try:
+                        if isinstance(_last.get("content"), str):
+                            interpreter.messages[-1]["content"] = (
+                                _last["content"] + "\n\nThe task is done."
+                            )
+                    except Exception:
+                        pass
+                    return
+            if (
+                llm_loop_guard["calls"] > LOOP_GUARD_CAP
+                and _assistant_text
+            ):
+                _flog.warning(
+                    "llm loop guard: %d text-only llm calls this turn; forcing end",
+                    llm_loop_guard["calls"],
+                )
+                trace("llm_loop_guard_end")
+                try:
+                    if isinstance(_last.get("content"), str):
+                        interpreter.messages[-1]["content"] = (
+                            _last["content"] + "\n\nThe task is done."
+                        )
+                except Exception:
+                    pass
+                return
+            _flog.info(
+                "llm call: loop=%s msgs=%d last=%s:%s model=%s tools=%s tool_choice=%s think=%s guard_calls=%d",
+                getattr(interpreter, "loop", "?"),
+                len(interpreter.messages),
+                _last.get("role", "?"),
+                _last.get("type", "?"),
+                str(getattr(interpreter.llm, "model", "?")),
+                bool(params.get("tools")),
+                params.get("tool_choice"),
+                params.get("think", "UNSET"),
+                llm_loop_guard["calls"],
+            )
             api_base = str(getattr(interpreter.llm, "api_base", "") or "")
             if "generativelanguage" in api_base and params.get("messages"):
                 # Gemini 3 requires thought_signature round-trips on tool-call
@@ -861,13 +978,28 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
         re.IGNORECASE,
     )
 
-    async def dispatch_text(text, *, from_telegram=False):
+    async def dispatch_text(text, *, from_telegram=False, reply_channel=""):
         """Route webview/telegram text through the same owned interpreter turn as voice."""
         request = str(text or "").strip()
         if not request:            return {"accepted": False, "status": "invalid", "message": "Enter a message first."}
         if server_state["is_paused"]:
             return {"accepted": False, "status": "paused", "message": "Voice mode is paused."}
         content = request
+        # Remember where this turn's reply must go even after telegram_capture
+        # is cleared by the delivery path (so a permanent failure can still
+        # reach the originator). /chat sentinel -> "text"; telegram handler set
+        # telegram_capture already; local text/voice -> "".
+        server_state["turn_channel"] = (
+            "text"
+            if reply_channel == "text"
+            else str((server_state.get("telegram_capture") or {}).get("chat_id") or "")
+        )
+        if reply_channel == "text":
+            # No-voice text-command channel (/chat): deliver the final answer
+            # into the text_reply_queue instead of speaking it here. Reuses the
+            # telegram capture slot as the delivery hook with a sentinel chat id.
+            server_state["telegram_capture"] = {"chat_id": TEXT_CHANNEL_CHAT_ID}
+            server_state["telegram_turn_mute"] = True
         chat_append("user", content)
         publish_status(STATUS_THINKING, "FRIDAY is working")
         server_state["last_user_text"] = content
@@ -1097,6 +1229,24 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
     )
     telegram_adapter.photo_handler = telegram_photo_handler
     server_state["telegram_adapter"] = telegram_adapter
+
+    async def _deliver_failure_notice(state, text):
+        """Route the honest failure note to the turn's ORIGINATING channel.
+        telegram_capture is already cleared by the delivery path before the
+        permanent-failure block runs, so 'turn_channel' (set at dispatch) is
+        the source of truth here."""
+        channel = state.get("turn_channel") or ""
+        if not channel:
+            return
+        state["turn_channel"] = ""
+        if channel == "text":
+            state.setdefault("text_reply_queue", asyncio.Queue())
+            await state["text_reply_queue"].put(text)
+        else:
+            try:
+                await telegram_adapter.send_text(channel, text)
+            except Exception as error:
+                _flog.warning("telegram failure notice failed: %s", error)
 
     async def start_telegram_remote():
         if telegram_adapter.enabled:
@@ -1413,6 +1563,7 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         return
 
                     server_state["brain_router"].apply_for(clean_content, interpreter)
+                    server_state["turn_channel"] = ""  # local voice turn: no remote out-channel
                     _begin_single_turn(self, server_state, user=clean_content, source="voice")
                     _mark_turn_dispatch(server_state, interpreter, user=clean_content, content=content, source="voice")
                     await old_input({"role": "user", "type": "message", "start": True})
@@ -1481,12 +1632,32 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                     chat_finalize(turn.get("assistant_snippet", "") if turn else "")
 
                     capture = server_state.get("telegram_capture")
-                    if capture is not None and turn and turn.get("assistant_snippet"):
+                    if capture is not None and turn:
                         # The turn just said something while a Telegram chat
                         # was waiting: send the SAME text to that phone chat.
                         capture_chat_id = str(capture.get("chat_id") or "")
                         snippet_text = _redact_for_phone(turn.get("assistant_snippet") or "").strip()
-                        if capture_chat_id and snippet_text:
+                        if not snippet_text and (turn.get("actions") or []):
+                            # Turn ran tools but the FINAL model call produced
+                            # no spoken text (qwen3 sometimes closes an empty
+                            # tool-call frame). Answer honestly instead of
+                            # leaving /chat in a 504 silence / a hung phone.
+                            step_count = len(turn["actions"])
+                            snippet_text = (
+                                f"Finished that — {step_count} step"
+                                f"{'s were' if step_count != 1 else ' was'} completed, "
+                                "but I produced no spoken answer this turn."
+                            )
+                        if capture_chat_id == TEXT_CHANNEL_CHAT_ID:
+                            # No-voice /chat channel: hand the reply to the
+                            # waiting text command instead of Telegram/TTS.
+                            snippet_text = snippet_text or "(no reply was produced this turn)"
+                            if snippet_text:
+                                server_state.setdefault("text_reply_queue", asyncio.Queue())
+                                await server_state["text_reply_queue"].put(snippet_text)
+                            server_state["telegram_capture"] = None
+                            server_state["telegram_turn_mute"] = False
+                        elif capture_chat_id and snippet_text:
                             try:
                                 await telegram_adapter.send_text(capture_chat_id, snippet_text)
                             except Exception as error:
@@ -1548,7 +1719,10 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         direct_text = server_state.get("last_direct_text")
                         if direct_text and capture is not None:
                             chat_id = str(capture.get("chat_id") or "")
-                            if chat_id:
+                            if chat_id == TEXT_CHANNEL_CHAT_ID:
+                                server_state.setdefault("text_reply_queue", asyncio.Queue())
+                                await server_state["text_reply_queue"].put(direct_text)
+                            elif chat_id:
                                 try:
                                     await telegram_adapter.send_text(chat_id, direct_text)
                                 except Exception as error:
@@ -1633,9 +1807,14 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         server_state["brain_router"].mark_failure(reason=turn_error)
                         server_state["turn_error"] = ""
                         if not server_state["is_paused"]:
-                            queue_direct_response(
+                            sorry = (
                                 "Sorry, Sir — the assistant engine hit an error and couldn't finish that request. Please try again."
                             )
+                            queue_direct_response(sorry)
+                            # telegram_capture is already cleared here; use the
+                            # turn_channel snapshot so /chat and Telegram turns
+                            # still get the honest answer instead of a 504/timeout.
+                            await _deliver_failure_notice(server_state, sorry)
                         if open_hot_window():
                             return {
                                 "hot_window": True,
@@ -1760,14 +1939,25 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                             _capture = server_state.get("telegram_capture")
                             if _capture is not None and str(_capture.get("chat_id") or ""):
                                 _c_chat_id = str(_capture.get("chat_id"))
-                                try:
-                                    await telegram_adapter.send_text(_c_chat_id, wrap)
-                                except Exception as _e:
-                                    _flog.warning("telegram hard-stop notice failed: %s", _e)
-                                # The phone got a real answer: end the muted
-                                # window so the late phase doesn't double-ping.
-                                server_state["telegram_capture"] = None
-                                server_state["telegram_turn_mute"] = False
+                                if _c_chat_id == TEXT_CHANNEL_CHAT_ID:
+                                    # No-voice /chat channel: deliver the honest
+                                    # wrap to the waiting text command instead
+                                    # of Telegram/TTS.
+                                    server_state.setdefault("text_reply_queue", asyncio.Queue())
+                                    await server_state["text_reply_queue"].put(
+                                        _redact_for_phone(wrap).strip()
+                                    )
+                                    server_state["telegram_capture"] = None
+                                    server_state["telegram_turn_mute"] = False
+                                else:
+                                    try:
+                                        await telegram_adapter.send_text(_c_chat_id, wrap)
+                                    except Exception as _e:
+                                        _flog.warning("telegram hard-stop notice failed: %s", _e)
+                                    # The phone got a real answer: end the muted
+                                    # window so the late phase doesn't double-ping.
+                                    server_state["telegram_capture"] = None
+                                    server_state["telegram_turn_mute"] = False
                         trace("tool_start")
                         publish_status(STATUS_THINKING, f"Running tool #{tool_counter['n']}")
                         _play_chirp("tool_start")
@@ -1819,8 +2009,8 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                             guard_text = (
                                 f"[System loop-guard] This turn has now run {tool_counter['n']} "
                                 "tool executions without completing the task. READ "
-                                "~/.friday/scratchpad.md FIRST (screenshots already captured in "
-                                "D:\\01\\screenshots, locates already tried with results), then "
+"~/.friday/scratchpad.md FIRST (screenshots already captured in "
+                                 "the screenshot folder (FRIDAY_SCRATCH_DIR / repo `screenshots`), locates already tried with results), then "
                                 "STOP retrying the same strategy. Either pivot to a materially "
                                 "DIFFERENT mechanism (e.g. launch via Start menu / os.startfile / "
                                 "resolved exe path instead of hunting an icon, or keyboard "
@@ -1983,6 +2173,34 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
         except Exception as error:
             return PlainTextResponse("no window")
         return PlainTextResponse("FRIDAY window raised")
+
+    @interpreter.server.app.post("/chat")
+    async def chat(request: Request):
+        """No-voice text command: POST the raw text (or {"text": "..."}) and
+        receive FRIDAY's final reply. Runs the SAME dispatch_text chain as the
+        HUD chat input and Telegram, so routers/memory/screen/brain all apply.
+        The reply is delivered to the text_reply_queue instead of being spoken."""
+        raw = (await request.body()).decode("utf-8", errors="replace").strip()
+        text_in = raw
+        if raw.startswith("{"):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
+                    text_in = parsed["text"].strip() or text_in
+            except Exception:
+                pass
+        if not text_in:
+            return PlainTextResponse("empty request", status_code=400)
+        timeout = float(os.environ.get("FRIDAY_TEXT_TIMEOUT", "240"))
+        result = await dispatch_text(text_in, reply_channel="text")
+        if not result.get("accepted"):
+            return PlainTextResponse(f"NOT ACCEPTED: {result}", status_code=500)
+        queue = server_state.setdefault("text_reply_queue", asyncio.Queue())
+        try:
+            reply = await asyncio.wait_for(queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return PlainTextResponse("(no reply within timeout)", status_code=504)
+        return PlainTextResponse(reply)
 
     def terminal_input_thread():
         while True:

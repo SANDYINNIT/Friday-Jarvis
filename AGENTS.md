@@ -16,20 +16,26 @@ This tree is the SHIPPABLE copy of FRIDAY (the personal voice-first computer ass
    pip install --no-deps -r requirements_freeze.txt
    ```
    (`--no-deps` is required: the freeze is an exact closure; plain resolution conflicts — litellm needs `openai>=2.20,<3.0` while livekit-plugins-openai pins `openai~=1.35`.)
-2. Re-apply the 3 hand-patched Open Interpreter files into that Python's site-packages:
+2. Re-apply the 5 hand-patched Open Interpreter files into that Python's site-packages:
    ```
    $sp = & python -c "import sys; print(next(p for p in sys.path if p.endswith('site-packages')))"
    copy .\site-packages-patches\interpreter\core\computer\display\display.py      "$sp\interpreter\core\computer\display\"
    copy .\site-packages-patches\interpreter\core\computer\display\friday_locate.py "$sp\interpreter\core\computer\display\"
    copy .\site-packages-patches\interpreter\core\computer\vision\vision.py         "$sp\interpreter\core\computer\vision\"
+   copy .\site-packages-patches\interpreter\core\respond.py                        "$sp\interpreter\core\"
+   copy .\site-packages-patches\interpreter\core\llm\utils\merge_deltas.py         "$sp\interpreter\core\llm\utils\"
    ```
 3. Copy `dot_friday\api_credentials.example.json` → `dot_friday\api_credentials.json` and fill in keys (or skip — FRIDAY runs fully local without any).
 4. Run: `python software\main.py` (see `--help`; `--server-port` overrides the default port).
 
+LiveKit voice (optional, `--server livekit`): pip does NOT ship the LiveKit server binary. Download `livekit-server` from https://github.com/livekit/livekit/releases (Windows: `livekit_1.13.7_windows_amd64.zip`; also on Homebrew/Linux) and put it on PATH. `main.py` refuses to boot in livekit mode with a clear message if the binary is missing.
+
+Windows build toolchain (optional): 21 of the frozen pins are sdist-only (`webrtcvad`, `docopt`, `html2text`, `wget`, `PyAutoGUI`, `PyGetWindow`, `PyRect`, `pytweening`, `proxy_tools`, `MouseInfo`, `PyMsgBox`, `pyperclip`, `PyScreeze`, `encodec`, `gruut*`, ...). If pip tries to build one, install MSVC Build Tools (Visual Studio Build Tools with the C++ workload) first; `webrtcvad` has no prebuilt wheel anywhere. FRIDAY's core does not require it.
+
 ## Repository structure (software\)
 - `main.py` — entrypoint (server boot, livekit, auto-start hooks).
 - `source\server\` — the assistant: routing, STT/brain/TTS pools (`api_pools.py`), Open Interpreter integration, memory (`self_improve.py`, scratchpad/lessons in `~/.friday\`), profiles (`profiles\default.py`), remote control (`remote_telegram.py`), UI (`ui\`), LiveKit voice (`livekit\`).
-- `site-packages-patches\` — the 3 patched OI files this repo ships (also stamped into site-packages at install).
+- `site-packages-patches\` — the 5 patched OI files this repo ships (also stamped into site-packages at install; the `tmp-oi\` wheel already bakes them in too).
 - `tmp-oi\` — patched open-interpreter wheel for the freeze.
 - `requirements_freeze.txt` / `pyproject.toml` — exact dependency closures; `poetry.lock` intentionally not shipped (first `poetry install` rebuilds it).
 

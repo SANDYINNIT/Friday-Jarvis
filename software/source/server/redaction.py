@@ -88,8 +88,8 @@ def redact(text, mask_paths=True):
 
     ``mask_paths=False`` keeps real filesystem paths intact (used for
     owner-bound phone replies where the owner needs the actual path — the
-    full masking would turn ``D:\\01\\...`` into ``<PATH>``, making answers
-    like "I'm working in D:\\01\\software" useless). Secrets (tokens, keys,
+    full masking would turn ``C:\\work\\project\\...`` into ``<PATH>``, making answers
+    like "I'm working in C:\\work\\project" useless). Secrets (tokens, keys,
     emails, cards, phone numbers, IPs) are ALWAYS masked either way.
     """
     if not isinstance(text, str) or not text:

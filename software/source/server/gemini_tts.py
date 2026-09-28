@@ -25,12 +25,13 @@ from . import api_pools
 GEMINI_NATIVE_BASE = os.environ.get(
     "FRIDAY_GEMINI_NATIVE_BASE", "https://generativelanguage.googleapis.com/v1beta/models"
 )
-# Per-model quota buckets and preview-suffix drift: try the preview id first
-# (documented as the 3.1 streaming TTS model), then the plain id.
+# The 3.1 streaming TTS model is only published as the -preview id; the bare
+# `gemini-3.1-flash-tts` id is undocumented (caused a 404 storm historically),
+# so the default chain keeps just the documented preview id. Overridable.
 GEMINI_TTS_MODEL_CHAIN = [
     name.strip()
     for name in os.environ.get(
-        "FRIDAY_GEMINI_TTS_MODEL_CHAIN", "gemini-3.1-flash-tts-preview,gemini-3.1-flash-tts"
+        "FRIDAY_GEMINI_TTS_MODEL_CHAIN", "gemini-3.1-flash-tts-preview"
     ).split(",")
     if name.strip()
 ]

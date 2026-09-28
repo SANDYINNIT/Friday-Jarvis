@@ -70,7 +70,7 @@ def read_scratchpad():
 
 
 def save_screenshot_folder():
-    """Return a pruned, always-writable screenshot dir (D:\\01\\screenshots)."""
+    """Return a pruned, always-writable screenshot dir (FRIDAY_SCRATCH_DIR / repo `screenshots`)."""
     directory = scratchdir_path()
     try:
         os.makedirs(directory, exist_ok=True)
