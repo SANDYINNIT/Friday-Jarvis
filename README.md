@@ -50,38 +50,106 @@ The flow is deliberately **forward-only failover**: when a provider errors or ra
 ## Requirements
 
 - **OS:** Windows 10/11 (Windows-only features are used throughout).
+- **Git for Windows** — so you can clone and later pull updates with the bundled
+  updater (<https://git-scm.com/download/win>).
 - **Python 3.11** — a virtualenv is *optional*; FRIDAY runs against any plain Python 3.11 install.
-- **pip** (recommended) or **Poetry** for installing dependencies.
+- **pip** for installing dependencies (Poetry also works via `pyproject.toml`).
 - **Ollama** running locally with at least `qwen3:8b`:
   ```powershell
   ollama pull qwen3:8b
   ```
 - **Optional — cloud API keys** (Groq, OpenRouter, Gemini, Deepgram, Telegram bot) for cloud STT/brain/vision/TTS and phone control. Without them FRIDAY runs fully local.
+- **Optional — Microsoft C++ build tools** only if a fully clean `pip install` tries to compile a source-only package (e.g. `webrtcvad`); FRIDAY's core does not require it.
 
 ---
 
 ## Installation
 
+> **Read this first if something goes wrong:** the steps below are ordered and
+> each one depends on the last. The three that people most often get wrong are
+> (1) installing with `--no-deps`, (2) copying the **5** patched files (there are
+> five, not three), and (3) running from the `software\` folder. See
+> [Troubleshooting](#troubleshooting) for exact fixes.
+
+FRIDAY is a **Windows** app. Everything below is PowerShell.
+
+### Step 0 — Get the code
+
 ```powershell
-# 1. Clone and enter the project
-git clone <your-repo-url>
-cd <repo>\software
+git clone https://github.com/SANDYINNIT/Friday-Jarvis.git
+cd Friday-Jarvis\software
+```
 
-# 2. Install dependencies into YOUR Python 3.11 — no virtualenv required.
-#    (A venv works too: create and activate one first if you want isolation —
-#    everything below then runs against `python` inside that venv.)
+Keep this as a **git clone** (not a ZIP download) — that is what lets you pull
+future updates with the one-line updater below.
+
+### Step 1 — Prerequisites
+
+- **Python 3.11** (check with `python --version`). A virtualenv is optional.
+- **Ollama** running, with the brain model pulled:
+  ```powershell
+  ollama pull qwen3:8b
+  ```
+- Optional: [LiveKit server](https://github.com/livekit/livekit/releases) only
+  if you want the experimental `--server livekit` voice (skip it otherwise).
+
+### Step 2 — Install the dependencies
+
+Run from inside `software\`:
+
+```powershell
 pip install --no-deps -r requirements_freeze.txt
-#    The patched open-interpreter wheel installs from the relative tmp-oi\ path.
+```
 
-# 3. Re-apply the 3 hand-patched Open Interpreter files from this repo into
-#    that same Python's site-packages (resolved automatically):
+- `--no-deps` is **required**. The freeze is an exact, tested closure; letting
+  pip resolve dependencies itself breaks it (e.g. litellm needs
+  `openai>=2.20,<3.0` while `livekit-plugins-openai` pins `openai~=1.35`).
+- This step also installs the patched Open Interpreter wheel from the relative
+  `tmp-oi\` path, so it must be run with `software\` as the working directory.
+- If pip tries to **compile** a package (you'll see "Building wheel for …"), it
+  needs Microsoft's C++ build tools first — install "Visual Studio Build Tools"
+  with the C++ workload from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+  and re-run. 21 of the frozen pins are source-only (`webrtcvad`, `PyAutoGUI`,
+  `PyGetWindow`, `pytweening`, `docopt`, `html2text`, `wget`, `PyRect`,
+  `proxy_tools`, `MouseInfo`, `PyMsgBox`, `pyperclip`, `PyScreeze`, `encodec`,
+  `gruut*`). `webrtcvad` has no prebuilt wheel anywhere. FRIDAY's core does not
+  need these, but a fully clean install will.
+
+### Step 3 — Re-apply the 5 patched Open Interpreter files
+
+The patched wheel already contains these, but re-applying them guarantees the
+exact files this repo ships are what you run (and undoes any later pip
+overwrite). This Python snippet prints the right `site-packages` folder for you:
+
+```powershell
 $sp = & python -c "import sys; print(next(p for p in sys.path if p.endswith('site-packages')))"
 copy .\site-packages-patches\interpreter\core\computer\display\display.py      "$sp\interpreter\core\computer\display\"
 copy .\site-packages-patches\interpreter\core\computer\display\friday_locate.py "$sp\interpreter\core\computer\display\"
 copy .\site-packages-patches\interpreter\core\computer\vision\vision.py         "$sp\interpreter\core\computer\vision\"
+copy .\site-packages-patches\interpreter\core\respond.py                        "$sp\interpreter\core\"
+copy .\site-packages-patches\interpreter\core\llm\utils\merge_deltas.py         "$sp\interpreter\core\llm\utils\"
 ```
 
-The patches replace Open Interpreter's broken remote `/point/` display API with FRIDAY's own local vision chain (`friday_locate.py`), so her "look at the screen / find X" commands work without a third-party service.
+Those patches replace Open Interpreter's broken remote `/point/` display API with
+FRIDAY's own local vision chain (`friday_locate.py`), so her "look at the screen
+/ find X" commands work without a third-party service.
+
+### Step 4 — (Optional) API keys
+
+FRIDAY runs fully local with no keys. To enable cloud STT/brain/vision/TTS and
+Telegram, see [API credentials](#api-credentials) below.
+
+### Step 5 — Run it
+
+From inside `software\`:
+
+```powershell
+python main.py --status-ui
+```
+
+Startup takes 30–60 s the first time (the brain loads). When she's ready she
+answers `http://localhost:10101/ping` with `pong`. **If that shows `pong`, your
+install is good.**
 
 ### API credentials
 
@@ -147,6 +215,71 @@ Startup takes 30–60s on first boot (the voice brain loads first). FRIDAY answe
 
 ---
 
+## Keeping it updated
+
+This project is kept up to date on GitHub. When a new version is committed
+upstream, pull it into your install with the bundled updater — it does the
+whole job (code + dependencies + re-applies the patched files), so you never
+have to repeat the install steps by hand.
+
+Run it from the **repository root** (the folder containing `README.md`):
+
+```powershell
+# Update to the latest commit (fetch → pull → pip install → re-apply patches)
+powershell -ExecutionPolicy Bypass -File .\update_friday.ps1
+```
+
+Useful flags:
+
+| Flag | What it does |
+|---|---|
+| *(none)* | Update code, install deps, re-apply the 5 patched files, then tell you to restart |
+| `-Check` | Just say whether a newer commit exists; change nothing |
+| `-Force` | Re-run the install/patch steps even if you're already up to date |
+| `-NoPip` | Update the source only (skip `pip install` and the patch re-copy) |
+
+After it finishes, restart FRIDAY to load the new code. Your keys and data
+(`dot_friday\api_credentials.json`, `%USERPROFILE%\.friday\`, `pc_memory.md`,
+your `*.db`) are **never** touched by the updater.
+
+> The updater uses `git`, so keep FRIDAY as a **git clone** (Step 0). If you
+> ever re-install as a plain ZIP, the updater will tell you to re-clone instead.
+> Prefer not to hand-edit files inside the checkout — local edits can cause the
+> `git pull` to stop; commit them on a branch or use `-NoPip` and copy them in.
+
+---
+
+## Troubleshooting
+
+**`/ping` never answers, or the window doesn't appear**
+- Make sure you're running from the `software\` folder and with the same Python
+  you installed into. Confirm the brain is loaded: `curl http://localhost:10101/ping`.
+- First boot loads the brain and can take up to a minute; wait and retry.
+
+**`ModuleNotFoundError: No module named 'open_interpreter'` / imports fail**
+- The `pip install` (Step 2) didn't finish. Re-run it from `software\` with
+  `--no-deps`. If it complained about building a wheel, install the C++ build
+  tools first (see Step 2).
+
+**Her "look at the screen" / find-on-screen commands fail, or you see `/point/`**
+- The 5 patched files (Step 3) aren't applied. Re-run that step (or the
+  updater, which does it for you).
+
+**`pip install` resolution errors (`openai` conflict, etc.)**
+- You dropped `--no-deps`. Use the exact command: `pip install --no-deps -r requirements_freeze.txt`.
+
+**Port 10101 already in use**
+- Something else (or a second FRIDAY) is on the port. Either stop it, or start
+  FRIDAY on a different one: `python main.py --status-ui --server-port 10102`.
+
+**`--server livekit` exits with a message about `livekit-server`**
+- That binary isn't installed by pip. Download it from
+  <https://github.com/livekit/livekit/releases> (Windows:
+  `livekit_1.13.7_windows_amd64.zip`), put it on your PATH, and re-run. The
+  default `--server light` needs none of this.
+
+---
+
 ## Where to go and what to do
 
 | Place | What you can do there |
@@ -162,19 +295,22 @@ Startup takes 30–60s on first boot (the voice brain loads first). FRIDAY answe
 ## Directory structure
 
 ```
-software\
-├── main.py                 → entry point (typer CLI: --status-ui / --background / --profile …)
-├── pyproject.toml          → dependencies; pins the patched Open Interpreter wheel (tmp-oi\)
-├── requirements_freeze.txt → pip freeze snapshot for pip-based installs
-├── start_friday.ps1        → desktop launcher
-├── friday_boot.vbs         → hidden boot wrapper used by the registry auto-start
-├── memory\project_notes.md → FRIDAY's working notes
-├── skills\                 → skills mount point
-├── tmp-oi\*.whl            → the patched open-interpreter wheel (required by the build)
-├── site-packages-patches\  → the 3 hand-patched interpreter files (re-apply after install)
-└── source\
-    ├── clients\light-python\client.py  → the desktop voice client
-    └── server\
+Friday-Jarvis\
+├── README.md / AGENTS.md    → these docs
+├── update_friday.ps1        → one-command updater (git pull + install + re-apply patches)
+└── software\
+    ├── main.py                 → entry point (typer CLI: --status-ui / --background / --profile …)
+    ├── pyproject.toml          → dependencies; pins the patched Open Interpreter wheel (tmp-oi\)
+    ├── requirements_freeze.txt → pip freeze snapshot for pip-based installs
+    ├── start_friday.ps1        → desktop launcher
+    ├── friday_boot.vbs         → hidden boot wrapper used by the registry auto-start
+    ├── memory\project_notes.md → FRIDAY's working notes
+    ├── skills\                 → skills mount point
+    ├── tmp-oi\*.whl            → the patched open-interpreter wheel (required by the build)
+    ├── site-packages-patches\  → the 5 hand-patched interpreter files (re-apply after install)
+    └── source\
+        ├── clients\light-python\client.py  → the desktop voice client
+        └── server\
         ├── server.py         → core loop: wake word, STT, brain routing, tools, TTS
         ├── brain_router.py   → weakest-first model routing + per-provider failover
         ├── cloud_stt.py      → cloud STT with key rotation (Groq → Deepgram)
