@@ -200,3 +200,110 @@ def test_screen_fallback_is_direct_and_does_not_call_open_interpreter(monkeypatc
     assert result.count("\n") == 0  # a single short spoken line
     assert "RAM" not in result      # raw OCR telemetry is not spoken
     assert "execute" not in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Screenshot legibility + follow-up context (2026-09-30)
+#
+# Real failure: Sir asked "what is the left one about / what does it do" and
+# FRIDAY answered "a simple or minimalistic web page... likely a background
+# display". Root cause was a 640px max-side cap that turned this machine's
+# 3840x1080 desktop into a 640x180 frame - OCR on it returned ZERO words.
+# ---------------------------------------------------------------------------
+
+
+def test_vision_budget_is_usable_not_a_thumbnail():
+    """The cap must be a real pixel budget, not the old 640px side."""
+    assert screen.VISION_MAX_PIXELS > 400_000, (
+        "a sub-400k pixel budget cannot read UI text on a 1080p screen"
+    )
+    assert screen.VISION_MAX_SIDE >= 1280, "1280 is the practical floor for readable UI"
+
+
+def test_fit_for_vision_respects_pixel_budget():
+    from PIL import Image
+
+    image = Image.new("RGB", (3840, 1080), "white")
+    fitted = screen._fit_for_vision(image)
+    assert fitted.size[0] * fitted.size[1] <= screen.VISION_MAX_PIXELS * 1.05
+    assert fitted.size[0] <= screen.VISION_MAX_SIDE
+
+
+def test_fit_for_vision_keeps_small_images_intact():
+    from PIL import Image
+
+    image = Image.new("RGB", (400, 300), "white")
+    assert screen._fit_for_vision(image).size == (400, 300)
+
+
+def test_encode_jpeg_uses_high_quality():
+    """q75 destroyed small UI text; text needs q85+."""
+    from PIL import Image
+
+    noisy = Image.effect_noise((600, 400), 60).convert("RGB")
+    high = screen._encode_jpeg(noisy, quality=95)
+    low = screen._encode_jpeg(noisy, quality=75)
+    assert len(high) > len(low), "quality=95 must preserve more detail than q75"
+
+
+def test_ocr_intent_covers_what_does_it_do_questions():
+    for question in (
+        "what does the application do that is open?",
+        "what is the left one about?",
+        "explain what i am looking at",
+        "what does that app do",
+        "what am i working on right now",
+    ):
+        assert screen._wants_ocr(question) is True, question
+
+
+def test_ocr_intent_stays_off_for_plain_description():
+    assert screen._wants_ocr("what do you see") is False
+    assert screen._wants_ocr("") is False
+    assert screen._wants_ocr("play some music") is False
+
+
+def test_monitor_labels_are_left_to_right_after_sorting():
+    """The enumeration index is NOT left-to-right; labelling from it swapped
+    left and right, so 'the left one' answered about the wrong screen."""
+    layout = screen._monitor_layout()
+    if not layout:
+        return  # single/headless environment
+    xs = [monitor["bounds"][0] for monitor in layout]
+    assert xs == sorted(xs), "monitors must be ordered by X (left to right)"
+    if len(layout) > 1:
+        assert "LEFT" in layout[0]["label"]
+        assert "RIGHT" in layout[-1]["label"]
+
+
+def test_select_regions_picks_one_side_when_named(monkeypatch):
+    from PIL import Image
+
+    left = {"label": "the LEFT screen", "image": Image.new("RGB", (10, 10)), "primary": False}
+    right = {"label": "the RIGHT screen", "image": Image.new("RGB", (10, 10)), "primary": True}
+    monkeypatch.setattr(screen, "_capture_regions", lambda: [left, right])
+    assert [r["label"] for r in screen._select_regions("what is the left one about")] == [
+        "the LEFT screen"
+    ]
+    assert [r["label"] for r in screen._select_regions("what is on my right")] == [
+        "the RIGHT screen"
+    ]
+
+
+def test_describe_screen_runs_ocr_on_content_questions(monkeypatch):
+    """A 'what does it do' ask must be grounded in real text, not captioning."""
+    from PIL import Image
+
+    image = Image.new("RGB", (1920, 1080), "white")
+    region = {"label": "the only screen", "image": image, "primary": True}
+    monkeypatch.setattr(screen, "_capture_regions", lambda: [region])
+    monkeypatch.setattr(screen, "get_active_window_context", lambda: {})
+    monkeypatch.setattr(screen, "_visible_window_titles", lambda: ["- Claude Code (claude.exe)"])
+    monkeypatch.setattr(screen.pytesseract, "image_to_string", lambda value: "JIRA BOARD SPRINT 42")
+    monkeypatch.setattr(
+        screen.requests, "post",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("vision must not run for OCR asks")),
+    )
+    result = screen.describe_screen("what does the application do that is open?")
+    assert "JIRA BOARD SPRINT 42" in result
+    assert "Claude Code" in result, "real window titles must ground the answer"

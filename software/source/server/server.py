@@ -115,13 +115,94 @@ def _redact_for_phone(value):
     return _redact(text, mask_paths=False) if text else ""
 
 
+# ---------------------------------------------------------------------------
+# Internal control text must never reach the user (2026-09-30).
+#
+# Observed on Telegram: after a vision turn the bot sent, verbatim,
+#   "I understand. I will continue only when the user's task is unfinished and
+#    stop immediately if the task is complete. I will not repeat
+#    acknowledgements or ask what to do next."
+# That is Open Interpreter's `interpreter.loop_message` (default.py:414) -
+# a control instruction FRIDAY feeds HERSELF to drive the agent loop. The
+# model echoed it as if it were an answer, and the echo was delivered to the
+# phone and spoken. Same family as the loop-breaker suffix ("The task is
+# done.") leaking into replies.
+#
+# A model can always parrot its own instructions, so the durable fix is a
+# delivery-layer filter, not a prompt change.
+# ---------------------------------------------------------------------------
+_INTERNAL_CONTROL_PATTERNS = (
+    re.compile(r"\bcontinue only when the user'?s? task is\b", re.I),
+    re.compile(r"\bif the task is complete,? stop immediately\b", re.I),
+    re.compile(r"\bi will not repeat acknowledgements\b", re.I),
+    re.compile(r"\bask what to do next\b", re.I),
+    re.compile(r"^\s*the task is (?:done|impossible)\.?\s*$", re.I),
+    re.compile(r"\[system loop-guard\]", re.I),
+    re.compile(r"^\s*i have stopped\.?\s*$", re.I),
+)
+
+
+def _is_internal_control_text(value):
+    """True when `value` is FRIDAY's own control text, not an answer."""
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _INTERNAL_CONTROL_PATTERNS)
+
+
+def _clean_user_text(value):
+    """Drop internal control text from anything bound for a human.
+
+    Returns "" when the whole message was internal, so callers naturally skip
+    sending it rather than delivering a blank bubble.
+
+    NOTE: this is a MODULE-level function but `_flog` is a local of
+    start_server(), so it must never touch `_flog` directly - doing so raised
+    NameError inside the Telegram delivery path. A test caught this.
+    """
+    if _is_internal_control_text(value):
+        try:
+            import logging
+
+            logging.getLogger("friday.control_text").info(
+                "suppressed internal control text from user-facing output"
+            )
+        except Exception:
+            pass
+        return ""
+    return str(value or "")
+
+
 # Follow-up turns that reference a screenshot FRIDAY just sent get the saved
 # vision read injected into brain context so she never pleads blind.
+#
+# WIDENED 2026-09-30 after the real failure: the original pattern only matched
+# literal words like "screenshot"/"photo"/"do you see", so these follow-ups
+# matched NOTHING and FRIDAY answered with no referent at all:
+#   "What is the left one about tho? Like what's being run? What does it do."
+#   "But what does the application do that is open?"
+#   "what does the application do that is open on the left screen????"
+# The symptom was "It seems there might be a misunderstanding or a typo in
+# your message" to a perfectly clear question. Demonstratives ("the left
+# one", "that app", "the window") and positional screen references now count.
 _SCREENSHOT_REFERENCE_RE = re.compile(
     r"\bscreenshot\b|\b(?:the\s+)photo\b|\bthe\s+(?:picture|shot)\b|"
     r"\b(?:did\s+you|do\s+you)\s+(?:see|catch|lose|get)\b|"
-    r"\bwhat\s+did\s+you\s+(?:just\s+)?(?:send)\b|\byou\s+(?:just\s+)?sent\b"
+    r"\bwhat\s+did\s+you\s+(?:just\s+)?(?:send)\b|\byou\s+(?:just\s+)?sent\b|"
+    # demonstrative / positional references to what is currently on screen
+    r"\bthe\s+(?:left|right|other|top|bottom)\s+(?:one|side|screen|monitor|window|app|application|tab)\b|"
+    r"\b(?:left|right)\s+(?:screen|monitor|window|one|side)\b|"
+    r"\b(?:this|that|these|those)\s+(?:one|app|application|window|program|tab|page)\b|"
+    r"\bthe\s+(?:open|current|currently open|running)\s+(?:app|application|window|program|one)\b|"
+    r"\bwhat(?:'s|\s+is)\s+(?:being\s+run|running|open|on)\b|"
+    r"\bwhat\s+does\s+the\s+(?:app|application|window|program|thing)\b|"
+    r"\bon\s+(?:my\s+)?(?:left|right)\b",
+    re.IGNORECASE,
 )
+
+# A screen read stays useful as context for a few minutes; a fresh capture is
+# always better, but the brain must still know what she last SAW.
+_SCREEN_CONTEXT_TTL_SECONDS = float(os.getenv("FRIDAY_SCREEN_CONTEXT_TTL", "900"))
 
 
 _CONSOLE_NOISE_RE = re.compile(r"[\s0-9=.<>+\-_,;:/]*[0-9][\s0-9=.<>+\-_,;:/]*")
@@ -827,6 +908,8 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                 turn_guard["started"] = time.monotonic()
                 turn_guard["console_events"] = 0
                 turn_guard["flood_stopped"] = False
+                turn_guard["same_run"] = 0
+                turn_guard["last_console"] = None
             llm_loop_guard["calls"] += 1
             _assistant_text = _last.get("role") == "assistant" and _last.get("type") in (None, "message")
             if _assistant_text and llm_loop_guard["calls"] >= 2:
@@ -1152,13 +1235,26 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             # Follow-up ("do you see your own screenshot that you sent?") must
             # NOT plead blind: FRIDAY DID capture it and DID see it — the
             # vision read gives the brain the real content to answer from.
-            content = (
-                "[Context: the screenshot I just captured and sent you showed - "
-                + str(last_shot.get("description") or "(the vision read is unavailable)")
-                + " You DID capture it and you saw it. Answer truthfully, "
-                "grounded in that description.]\n\n"
-                + content
-            )
+            shot_age = time.time() - float(last_shot.get("at") or 0)
+            if shot_age <= _SCREEN_CONTEXT_TTL_SECONDS:
+                content = (
+                    "[Context: the screenshot I just captured and sent you showed - "
+                    + str(last_shot.get("description") or "(the vision read is unavailable)")
+                    + " You DID capture it and you saw it. Answer truthfully, "
+                    "grounded in that description. If the user refers to 'the "
+                    "left one' / 'the app' / 'the window', they mean something in "
+                    "that description - resolve the reference from it, and say so "
+                    "plainly if it genuinely is not there.]\n\n"
+                    + content
+                )
+            else:
+                content = (
+                    "[Context: my last screen read is "
+                    + f"{int(shot_age / 60)} minutes old, so it may be stale. If the "
+                    "user is asking about what was on screen, capture a FRESH "
+                    "screenshot rather than answering from the old one.]\n\n"
+                    + content
+                )
         if from_telegram:
             # Make the source unmistakable: the brain must answer as a TEXT
             # bubble on Sir's phone — no local voice, no opening/showing
@@ -1712,7 +1808,9 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         # The turn just said something while a Telegram chat
                         # was waiting: send the SAME text to that phone chat.
                         capture_chat_id = str(capture.get("chat_id") or "")
-                        snippet_text = _redact_for_phone(turn.get("assistant_snippet") or "").strip()
+                        snippet_text = _clean_user_text(
+                            _redact_for_phone(turn.get("assistant_snippet") or "").strip()
+                        )
                         if not snippet_text and (turn.get("actions") or []):
                             # Turn ran tools but the FINAL model call produced
                             # no spoken text (qwen3 sometimes closes an empty
@@ -1867,6 +1965,10 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         # have no LLM turn: capture their handed-over text
                         # so the phone still gets the outcome.
                         direct_text = server_state.get("last_direct_text")
+                        if direct_text and capture is not None:
+                            # Never deliver FRIDAY's own loop/continuation
+                            # instructions to the phone as if they were answers.
+                            direct_text = _clean_user_text(direct_text)
                         if direct_text and capture is not None:
                             chat_id = str(capture.get("chat_id") or "")
                             if chat_id == TEXT_CHANNEL_CHAT_ID:
@@ -2261,13 +2363,27 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                     # number of console events and the total time in the turn.
                     turn_guard["console_events"] = turn_guard.get("console_events", 0) + 1
                     elapsed = time.monotonic() - turn_guard["started"]
-                    over_events = turn_guard["console_events"] > TOOL_FLOOD_EVENT_CAP
+                    # A real runaway repeats the SAME output forever. A
+                    # legitimate turn (a slow vision chain, a long OCR pass)
+                    # produces VARIED output. The first version of this guard
+                    # only counted events and killed a perfectly good vision
+                    # turn, which FRIDAY then reported to the phone as "the
+                    # code I wrote started looping" - a confident, false
+                    # statement about work that never looped. So the flood trip
+                    # now requires REPETITION, not volume.
+                    repeat_key = console_text[:200]
+                    if turn_guard.get("last_console") == repeat_key:
+                        turn_guard["same_run"] = turn_guard.get("same_run", 0) + 1
+                    else:
+                        turn_guard["same_run"] = 1
+                    turn_guard["last_console"] = repeat_key
+                    over_events = turn_guard["same_run"] > TOOL_FLOOD_EVENT_CAP
                     over_time = elapsed > TOOL_WALL_CLOCK_LIMIT
                     if over_events or over_time:
                         if not turn_guard.get("flood_stopped"):
                             turn_guard["flood_stopped"] = True
                             reason = (
-                                f"{turn_guard['console_events']} console events"
+                                f"same output {turn_guard['same_run']}x in a row"
                                 if over_events
                                 else f"{int(elapsed)}s wall clock"
                             )
@@ -2290,12 +2406,23 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                                 pass
                             # Tell the truth rather than go silent: this turn is
                             # being killed, so nothing downstream will speak for
-                            # her. Mirrors the HARD tool-cap path.
-                            flood_wrap = (
-                                "I stopped that myself - the code I wrote started "
-                                "looping instead of finishing, so I killed it rather "
-                                "than hang. Ask me again and I'll take a direct route."
-                            )
+                            # her. Mirrors the HARD tool-cap path. Wording is
+                            # chosen to match the ACTUAL reason - never claim a
+                            # loop when the real problem was elapsed time.
+                            if over_events:
+                                flood_wrap = (
+                                    "I stopped that myself - the code I wrote kept "
+                                    "repeating itself instead of finishing, so I "
+                                    "killed it rather than hang. Ask me again and "
+                                    "I'll take a direct route."
+                                )
+                            else:
+                                flood_wrap = (
+                                    "I gave up on that one - it ran past my time "
+                                    "limit without finishing, so I stopped it rather "
+                                    "than hang. Ask me again and I'll take a "
+                                    "shorter route."
+                                )
                             try:
                                 queue_speech_only(flood_wrap)
                             except Exception:

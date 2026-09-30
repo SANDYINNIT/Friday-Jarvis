@@ -226,3 +226,134 @@ class ScriptCaptureKeyTests(unittest.TestCase):
 
     def test_last_tool_script_is_recorded_for_self_awareness(self):
         self.assertIn("LAST_TOOL_SCRIPT", self._server_text())
+
+
+class InternalControlTextTests(unittest.TestCase):
+    """FRIDAY's own control instructions must never be spoken to the user.
+
+    Observed on Telegram: the bot sent `interpreter.loop_message` verbatim
+    ("I understand. I will continue only when the user's task is unfinished
+    and stop immediately if the task is complete...") because the model echoed
+    its own prompt. Same family as the loop-breaker suffix leaking.
+    """
+
+    def test_loop_message_echo_is_detected(self):
+        from source.server.server import _is_internal_control_text
+
+        echoed = (
+            "I understand. I will continue only when the user's task is unfinished "
+            "and stop immediately if the task is complete. I will not repeat "
+            "acknowledgements or ask what to do next."
+        )
+        self.assertTrue(_is_internal_control_text(echoed))
+
+    def test_loop_breakers_are_detected(self):
+        from source.server.server import _is_internal_control_text
+
+        for text in ("The task is done.", "The task is impossible.", "I have stopped."):
+            self.assertTrue(_is_internal_control_text(text), text)
+
+    def test_loop_guard_marker_is_detected(self):
+        from source.server.server import _is_internal_control_text
+
+        self.assertTrue(
+            _is_internal_control_text("[System loop-guard] This turn has run 12 tools")
+        )
+
+    def test_real_answers_pass_through(self):
+        from source.server.server import _is_internal_control_text
+
+        for text in (
+            "The left screen is running Claude Code, a terminal-based coding assistant.",
+            "That app is a Jira board showing Sprint 42.",
+            "I can see your browser with a Spanish news page open.",
+        ):
+            self.assertFalse(_is_internal_control_text(text), text)
+
+    def test_clean_user_text_drops_internal_and_keeps_real(self):
+        from source.server.server import _clean_user_text
+
+        self.assertEqual(_clean_user_text("The task is done."), "")
+        self.assertEqual(
+            _clean_user_text("Here is your answer."), "Here is your answer."
+        )
+
+
+class ScreenFollowUpContextTests(unittest.TestCase):
+    """Sir asked 'what is the left one about' and got a generic non-answer.
+
+    The reference regex only matched literal words like 'screenshot', so
+    demonstrative follow-ups matched nothing and no context was injected.
+    """
+
+    def _regex(self):
+        from source.server.server import _SCREENSHOT_REFERENCE_RE
+
+        return _SCREENSHOT_REFERENCE_RE
+
+    def test_real_follow_ups_now_match(self):
+        regex = self._regex()
+        for question in (
+            "What do you see?",
+            "What is the left one about tho? Like what's being run? What does it do.",
+            "But what does the application do that is open?",
+            "what does the application do that is open on the left screen????",
+            "what is on my right",
+            "what does that app do",
+        ):
+            self.assertTrue(regex.search(question), question)
+
+    def test_unrelated_turns_do_not_match(self):
+        regex = self._regex()
+        for question in (
+            "what is the weather tomorrow",
+            "thanks",
+            "play some music",
+            "set a timer for 10 minutes",
+        ):
+            self.assertIsNone(regex.search(question), question)
+
+    def test_context_ttl_is_configurable(self):
+        import os
+
+        from source.server.server import _SCREEN_CONTEXT_TTL_SECONDS
+
+        self.assertGreater(_SCREEN_CONTEXT_TTL_SECONDS, 0)
+        self.assertIsNotNone(os.environ.get("FRIDAY_SCREEN_CONTEXT_TTL", "900"))
+
+
+class RunawayGuardDiscriminationTests(unittest.TestCase):
+    """The guard must trip on REPEATED output, not on busy-but-progressing work.
+
+    First version counted every console event and killed a legitimate vision
+    turn, after which FRIDAY told the phone "the code I wrote started looping"
+    - a confident false statement about work that never looped.
+    """
+
+    def _server_text(self):
+        path = os.path.join(ROOT, "source", "server", "server.py")
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+
+    def test_guard_tracks_consecutive_repeats(self):
+        text = self._server_text()
+        self.assertIn("same_run", text)
+        self.assertIn("last_console", text)
+
+    def test_flood_trip_uses_same_run_not_raw_count(self):
+        text = self._server_text()
+        self.assertIn('over_events = turn_guard["same_run"] > TOOL_FLOOD_EVENT_CAP', text)
+
+    def test_message_distinguishes_loop_from_timeout(self):
+        """Never claim a loop when the real cause was elapsed time."""
+        text = " ".join(self._server_text().split())
+        self.assertIn("repeating itself", text)
+        self.assertIn("ran past my time", text)
+
+    def test_module_level_filter_never_touches_start_server_local_logger(self):
+        """`_flog` is a local of start_server(); a module-level helper that
+        logs through it raises NameError in the Telegram delivery path."""
+        from source.server.server import _clean_user_text
+
+        # Must not raise even though no server is running.
+        self.assertEqual(_clean_user_text("The task is done."), "")

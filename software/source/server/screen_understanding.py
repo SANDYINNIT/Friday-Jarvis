@@ -71,6 +71,47 @@ OCR_REQUESTS = (
     "what does my screen say",
 )
 
+# "What is that thing DOING / what is it ABOUT" asks are not literal
+# transcription, but they are impossible to answer without reading the pixels.
+# They used to fall through to pure captioning, which produced the observed
+# failure: "a simple or minimalistic web page... likely a background display"
+# for a screen that was actually a full app. These phrases now also trigger OCR
+# so the answer is grounded in the real text.
+OCR_INTENT_REQUESTS = (
+    "what does it do",
+    "what does the app do",
+    "what does the application do",
+    "what does that app do",
+    "what does this app do",
+    "what does the program do",
+    "what is it about",
+    "what's it about",
+    "what is that about",
+    "what is this about",
+    "what is on the left",
+    "what is on the right",
+    "what is that screen",
+    "what's that screen",
+    "what is the left one",
+    "what is the right one",
+    "what does the left one",
+    "what does the right one",
+    "tell me about",
+    "explain what i am looking at",
+    "explain what i'm looking at",
+    "what am i working on",
+    "what am i working on right now",
+    "what code is this",
+    "what does this code do",
+    "what does the error say",
+    "read the text",
+    "read the code",
+    "what text",
+    "what code",
+    "what does the terminal",
+    "what is the terminal",
+)
+
 VISION_TIMEOUT_SECONDS = float(os.getenv("FRIDAY_VISION_TIMEOUT", "25"))
 # Local vision gets its OWN (small) budget so a slow CPU-only model (this
 # machine's Ryzen 5 2600 took ~135s for qwen2.5vl:3b) can never stall a
@@ -292,17 +333,193 @@ def _capture_screen():
         return ImageGrab.grab()
 
 
-def _downscale_jpeg(jpeg_bytes, max_side=640):
-    """Cap the frame for vision encoders: smaller = faster + safer on old GPUs
-    (full-res frames crashed qwen2.5vl's Vulkan encode on the RX 580). 640px
-    keeps descriptions accurate for both cloud and local producers."""
+def _monitor_layout():
+    """Per-monitor geometry, left-to-right, with a human label for each.
+
+    A single 3840x1080 composite is the worst possible input for a vision
+    model: every pixel is halved in each direction, so UI text is destroyed.
+    Capturing each monitor NATIVELY gives the encoder readable text (measured:
+    141 OCR words natively vs 0 from the old 640px composite).
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", wintypes.LONG), ("top", wintypes.LONG),
+                ("right", wintypes.LONG), ("bottom", wintypes.LONG),
+            ]
+
+        class _MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", _RECT), ("rcWork", _RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        MONITORINFOF_PRIMARY = 0x00000001
+        user32 = ctypes.windll.user32
+        # A bare Python callback is not enough on 64-bit Windows: without an
+        # explicit prototype the HANDLE/HMONITOR arguments get truncated and
+        # EnumDisplayMonitors silently calls nothing. This exact typing is what
+        # makes the per-monitor split work.
+        _PROC = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+            ctypes.POINTER(_RECT), wintypes.LPARAM,
+        )
+        user32.EnumDisplayMonitors.argtypes = [
+            wintypes.HDC, ctypes.POINTER(_RECT), _PROC, wintypes.LPARAM,
+        ]
+        user32.EnumDisplayMonitors.restype = wintypes.BOOL
+        user32.GetMonitorInfoW.argtypes = [
+            wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO),
+        ]
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
+
+        monitors = []
+
+        def _callback(hmonitor, hdc, lprc, lparam):
+            info = _MONITORINFO()
+            info.cbSize = ctypes.sizeof(_MONITORINFO)
+            if user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
+                rect = info.rcMonitor
+                monitors.append({
+                    "index": len(monitors),
+                    "bounds": (rect.left, rect.top,
+                               rect.right - rect.left, rect.bottom - rect.top),
+                    "primary": bool(info.dwFlags & MONITORINFOF_PRIMARY),
+                })
+            return True
+
+        user32.EnumDisplayMonitors(None, None, _PROC(_callback), 0)
+        if not monitors:
+            return []
+        monitors.sort(key=lambda m: m["bounds"][0])
+        count = len(monitors)
+        for position, monitor in enumerate(monitors):
+            # Re-index AFTER sorting. The enumeration index is assigned during
+            # the ctypes walk, which is NOT left-to-right, so labelling from it
+            # swapped "left" and "right" - and "what is the LEFT one about?"
+            # then answered about the wrong screen.
+            monitor["index"] = position
+            if count == 1:
+                monitor["label"] = "the only screen"
+            elif position == 0:
+                monitor["label"] = "the LEFT screen"
+            elif position == count - 1:
+                monitor["label"] = "the RIGHT screen"
+            else:
+                monitor["label"] = f"the MIDDLE screen ({position + 1} of {count})"
+            # Say which one is the PRIMARY display so "the left one" can never
+            # be ambiguous: Windows' X ordering is objective, but the user may
+            # be sitting at either monitor.
+            if monitor["primary"]:
+                monitor["label"] += " (this is the PRIMARY display)"
+        return monitors
+    except Exception:
+        return []
+
+
+def _capture_regions():
+    """One native-resolution image per monitor, labelled left-to-right.
+
+    Falls back to a single untagged region when the monitor layout cannot be
+    enumerated, so this is always safe to call.
+    """
+    regions = []
+    layout = _monitor_layout()
+    if not layout:
+        try:
+            return [{"label": "the screen", "image": _capture_screen(), "primary": True}]
+        except Exception:
+            return []
+    for monitor in layout:
+        left, top, width, height = monitor["bounds"]
+        if width <= 0 or height <= 0:
+            continue
+        try:
+            image = ImageGrab.grab(bbox=(left, top, left + width, top + height))
+            regions.append({
+                "label": monitor["label"],
+                "image": image,
+                "primary": monitor["primary"],
+            })
+        except Exception:
+            continue
+    if not regions:
+        try:
+            return [{"label": "the screen", "image": _capture_screen(), "primary": True}]
+        except Exception:
+            return []
+    return regions
+
+
+# Vision encoders take the frame as a PIXEL budget, not a max side. Qwen2.5-VL
+# resizes to multiples of 28 and honours min_pixels/max_pixels; its own docs
+# recommend up to 2048*28*28 for OCR-grade accuracy and 1024*28*28 when
+# memory-constrained. The old 640px CAP was ~115k pixels for this machine's
+# 3840x1080 desktop, which is far below any useful reading size.
+VISION_MAX_PIXELS = int(float(os.getenv("FRIDAY_VISION_MAX_PIXELS", str(1280 * 28 * 28))))
+VISION_MAX_SIDE = int(float(os.getenv("FRIDAY_VISION_MAX_SIDE", "1920")))
+_VISION_PATCH = 28
+
+
+def _fit_for_vision(image):
+    """Scale an image to the vision pixel budget, rounded to /28 patches."""
+    try:
+        from PIL import Image
+
+        work = image
+        width, height = work.size
+        if width <= 0 or height <= 0:
+            return work
+        longest = max(width, height)
+        if longest > VISION_MAX_SIDE:
+            scale = VISION_MAX_SIDE / float(longest)
+            work = work.resize((max(1, int(width * scale)), max(1, int(height * scale))),
+                               Image.LANCZOS)
+            width, height = work.size
+        pixels = width * height
+        if pixels > VISION_MAX_PIXELS:
+            scale = (VISION_MAX_PIXELS / float(pixels)) ** 0.5
+            work = work.resize((max(1, int(width * scale)), max(1, int(height * scale))),
+                               Image.LANCZOS)
+        return work
+    except Exception:
+        return image
+
+
+def _encode_jpeg(image, quality=90):
+    """High-quality JPEG. Text needs q85+; q75 at 640px destroyed it."""
+    try:
+        from PIL import Image
+
+        out = io.BytesIO()
+        image.convert("RGB").save(out, format="JPEG", quality=quality)
+        return out.getvalue()
+    except Exception:
+        return b""
+
+
+def _downscale_jpeg(jpeg_bytes, max_side=None):
+    """Kept for compatibility with older callers.
+
+    The old default of 640px was the single biggest cause of "the AI is dumb
+    about my screen": it produced a 640x180 frame from a 3840x1080 desktop, and
+    OCR on that returned ZERO words. It now honours the pixel budget instead.
+    """
     try:
         from PIL import Image
 
         image = Image.open(io.BytesIO(jpeg_bytes))
-        image.thumbnail((max_side, max_side))
+        if max_side is not None:
+            image.thumbnail((int(max_side), int(max_side)))
+            fitted = image
+        else:
+            fitted = _fit_for_vision(image)
         out = io.BytesIO()
-        image.convert("RGB").save(out, format="JPEG", quality=75)
+        fitted.convert("RGB").save(out, format="JPEG", quality=90)
         return out.getvalue()
     except Exception:
         return jpeg_bytes
@@ -370,65 +587,159 @@ def _local_vision(prompt, jpeg_bytes, timeout=None):
     return False, None, last_error or "local vision: no description"
 
 
+def _wants_ocr(question):
+    """True for literal transcription AND for "what is this thing DOING" asks.
+
+    The second category used to skip OCR entirely, which is why a real app on
+    screen was described as "a simple or minimalistic web page".
+    """
+    normalized = " ".join(str(question or "").lower().split()).rstrip(".!? ")
+    if not normalized:
+        return False
+    return is_ocr_request(normalized) or any(
+        phrase in normalized for phrase in OCR_INTENT_REQUESTS
+    )
+
+
+def _select_regions(question):
+    """Pick the monitor(s) the question is actually about.
+
+    "the left one" / "on my right" must resolve to a single screen instead of
+    a composite where the answer is unreadable.
+    """
+    regions = _capture_regions()
+    if not regions:
+        return []
+    if len(regions) == 1:
+        return regions
+    normalized = " ".join(str(question or "").lower().split())
+    wants_left = "left" in normalized
+    wants_right = "right" in normalized
+    if wants_left and not wants_right:
+        return [regions[0]]
+    if wants_right and not wants_left:
+        return [regions[-1]]
+    # No side named: prefer the primary monitor (where the user works), and
+    # include the others so a question about "my screens" still sees both.
+    primary = [region for region in regions if region.get("primary")]
+    ordered = (primary or [regions[0]]) + [
+        region for region in regions if region not in (primary or [regions[0]])
+    ]
+    return ordered[:2]
+
+
+def _visible_window_titles(limit=8):
+    """Real window titles, so "what app is that?" has a factual anchor."""
+    try:
+        from .windows_control import list_windows
+
+        titles = []
+        for window in list_windows(limit=limit) or []:
+            if not isinstance(window, dict):
+                continue
+            title = str(window.get("title") or "").strip()
+            process = str(window.get("process") or "").strip()
+            if not title:
+                continue
+            entry = f"- {title}"
+            if process and process.lower() not in title.lower():
+                entry += f" ({process})"
+            if entry not in titles:
+                titles.append(entry)
+        return titles[:limit]
+    except Exception:
+        return []
+
+
 def describe_screen(question=""):
     """Capture a fresh screen and return only data from this capture.
 
-    OCR is authoritative for text requests. Vision is optional and bounded; a
-    timeout is reported instead of being turned into an affirmative claim.
+    OCR is authoritative for text AND for "what does this do" questions. Vision
+    is optional and bounded; a timeout is reported instead of being turned into
+    an affirmative claim. Each monitor is captured NATIVELY rather than as one
+    downscaled composite, because a 3840x1080 composite shrunk to 640px is
+    unreadable.
     """
-    image = _capture_screen()
-    # OCR is expensive on large multi-monitor frames (tens of seconds) and we
-    # now only surface OCR text for explicit 'read the text' asks — so skip it
-    # for descriptive screen questions entirely.
-    ocr_text = ""
-    if is_ocr_request(question):
-        ocr_text = pytesseract.image_to_string(image).strip()
+    regions = _select_regions(question)
+    if not regions:
+        return "Screen capture failed, so I have no description of your screen."
+
+    want_ocr = _wants_ocr(question)
     window_context = get_active_window_context()
-    window_hint = ""
-    if window_context:
-        window_hint = (
-            "Fresh active-window metadata: "
-            + repr(window_context)
-            + "\n"
-        )
-
-    buffer = io.BytesIO()
-    image.convert("RGB").save(buffer, format="JPEG", quality=75)
-    prompt = window_hint + (question or "Summarize the active application, critical errors, and key visible elements. Be extremely concise. Avoid boilerplate.")
-    jpeg_bytes = _downscale_jpeg(buffer.getvalue())
-
-    vision_text = ""
-    vision_error = ""
-    vision_provider = ""
-    if not is_ocr_request(question):
-        # LOCAL producer FIRST (user directive: screenshot understanding must
-        # be local and feed the brain; moondream is ~2-4s and covers both
-        # monitors). Cloud only as a fallback when local returns nothing.
-        ok, vision_text, vision_error = _local_vision(prompt, jpeg_bytes)
-        if ok and vision_text:
-            vision_provider = "local"
-            print(f"[screen vision ok: local]", flush=True)
-        if not vision_text and api_pools.cloud_vision_enabled():
-            ok, vision_text, vision_provider, vision_error = _cloud_vision(jpeg_bytes, prompt)
-            if ok and vision_text:
-                print(f"[screen vision ok: {vision_provider}]", flush=True)
-        if not vision_text and not vision_error:
-            vision_error = "vision returned no description"
 
     parts = []
-    if vision_text:
-        parts.append("Visual description:\n" + vision_text)
-    if ocr_text:
-        parts.append("OCR text:\n" + ocr_text)
+    for region in regions:
+        image = region["image"]
+        label = region["label"]
+        section = []
+
+        if want_ocr:
+            # OCR runs on the NATIVE per-monitor image: ~1.2s and it is the
+            # only thing that can actually read a UI.
+            try:
+                text = pytesseract.image_to_string(image).strip()
+            except Exception:
+                text = ""
+            if text:
+                section.append(f"Text visible on {label} (verbatim OCR):\n{text[:4000]}")
+
+        prompt_bits = []
+        if label:
+            prompt_bits.append(f"This image is {label} of a multi-monitor desktop.")
+        if question:
+            prompt_bits.append(str(question))
+        else:
+            prompt_bits.append(
+                "Summarize the active application, critical errors, and key visible elements."
+            )
+        prompt_bits.append(
+            "Read any visible text and name the actual application. If you cannot "
+            "read the text, say so plainly instead of guessing."
+        )
+        prompt = ""
+        if window_context and region.get("primary"):
+            prompt = "Fresh active-window metadata: " + repr(window_context) + "\n"
+        prompt += " ".join(prompt_bits)
+
+        jpeg_bytes = _encode_jpeg(_fit_for_vision(image))
+        vision_text = ""
+        vision_error = ""
+        vision_provider = ""
+        if not want_ocr:
+            ok, vision_text, vision_error = _local_vision(prompt, jpeg_bytes)
+            if ok and vision_text:
+                vision_provider = "local"
+            if not vision_text and api_pools.cloud_vision_enabled():
+                ok, vision_text, vision_provider, vision_error = _cloud_vision(
+                    jpeg_bytes, prompt
+                )
+            if not vision_text and not vision_error:
+                vision_error = "vision returned no description"
+
+        if vision_text:
+            section.append(f"Visual description of {label}:\n{vision_text}")
+        if vision_error and not vision_text and not want_ocr:
+            note = " Cloud vision was unavailable; text above is authoritative." if vision_provider else ""
+            section.append(
+                f"Visual analysis of this fresh capture of {label} was unavailable; "
+                f"do not infer visual details." + note
+            )
+        if not section:
+            section.append(f"No readable content detected on {label} in this fresh capture.")
+        parts.append("\n".join(section))
+
     if window_context:
         parts.append("Active window metadata:\n" + repr(window_context))
-    if vision_error and not vision_text:
-        timeout_note = ""
-        if vision_provider:
-            timeout_note = " Cloud vision was unavailable; OCR below is the authoritative fallback."
-        parts.append("Visual analysis unavailable for this fresh capture; do not infer visual details." + timeout_note)
-    if not parts:
-        return "Fresh screen capture completed, but it contained no readable text and visual analysis was unavailable."
+    titles = _visible_window_titles()
+    if titles:
+        parts.append(
+            "Windows currently open (ground truth, prefer these names over guesses):\n"
+            + "\n".join(titles)
+        )
+    parts.append(
+        "Reminder: answer from the OCR text and window names above. If they do not "
+        "identify something, say you cannot read it - never invent a purpose."
+    )
     return "\n\n".join(parts)[:SCREEN_RESPONSE_LIMIT]
 
 
