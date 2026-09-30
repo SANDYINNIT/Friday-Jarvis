@@ -194,6 +194,14 @@ _SCREENSHOT_REFERENCE_RE = re.compile(
     r"\b(?:left|right)\s+(?:screen|monitor|window|one|side)\b|"
     r"\b(?:this|that|these|those)\s+(?:one|app|application|window|program|tab|page)\b|"
     r"\bthe\s+(?:open|current|currently open|running)\s+(?:app|application|window|program|one)\b|"
+    # Relative-clause forms, which are how people actually phrase it:
+    # "the application THAT IS OPEN", "the app THAT'S running", "the window
+    # you have open". Missing these is why a clear question like "what does
+    # the application that is open do" was answered with a generic pixel
+    # description instead of from the screen read.
+    r"\b(?:app|application|window|program|tool|thing)\s+(?:that\s+(?:is|are)\s+|"
+    r"that'\s*s\s+|which\s+is\s+)(?:open|running|current|active|on\s+screen)\b|"
+    r"\b(?:app|application|window|program)\s+you\s+(?:have|got)\s+open\b|"
     r"\bwhat(?:'s|\s+is)\s+(?:being\s+run|running|open|on)\b|"
     r"\bwhat\s+does\s+the\s+(?:app|application|window|program|thing)\b|"
     r"\bon\s+(?:my\s+)?(?:left|right)\b",
@@ -1366,10 +1374,23 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                     "description": _redact_text(vision)[:1200],
                     "caption": _redact_text(caption or "")[:600],
                 }
-            try:
-                await telegram_adapter.send_photo(
-                    chat_id, jpeg, caption=(caption or "Fresh screen capture for you, Sir.")[:1024]
+            # The caption is ALWAYS AI-authored and grounded (vision read, else
+            # real OCR text, else the real open window titles). There is
+            # deliberately NO canned fallback string: "Fresh screen capture
+            # for you, Sir." is exactly the canned acknowledgement the project's
+            # Screen/Vision/Media policy forbids, and it shipped as a real reply
+            # because the vision chain had gone cold and the caption came back
+            # empty.
+            caption = caption or ""
+            if not caption:
+                await telegram_adapter.send_photo(chat_id, jpeg)
+                return (
+                    "I sent the screenshot, but I could not read anything off it - "
+                    "my vision chain is cold right now. Ask me again in a moment "
+                    "and I will describe what is actually there."
                 )
+            try:
+                await telegram_adapter.send_photo(chat_id, jpeg, caption=caption[:1024])
             except Exception as error:
                 _flog.warning("telegram screenshot send failed: %s", _redact_text(str(error)))
                 return "Sir, I captured the screen but couldn't upload it to Telegram. Check the PC and ask again if needed."
@@ -2694,6 +2715,23 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
 
     _watchdog_thread = threading.Thread(target=watchdog_loop, daemon=True, name="friday-watchdog")
     _watchdog_thread.start()
+
+    # Keep the local brain RESIDENT. Measured on this machine: a cold qwen3:8b
+    # reply takes 49.3s versus 2.2s warm, because Ollama unloads models after
+    # 5 minutes by default and FRIDAY idles between turns. That hidden load cost
+    # is what made captions come back empty, vision look unreliable, and turns
+    # report "every model is unavailable" - the brain was never slow, it was
+    # being reloaded inside every timeout window. Warming at boot would slow
+    # startup, so this runs in the background instead.
+    try:
+        from . import brain_keepalive
+
+        brain_keepalive.start(
+            model=getattr(getattr(interpreter, "llm", None), "model", None)
+        )
+        _flog.info("brain keep-alive: %s", brain_keepalive.status())
+    except Exception as keepalive_error:
+        _flog.info("brain keep-alive unavailable: %s", keepalive_error)
 
     def working_heartbeat():
         """While a response is in flight, publish every 5s so the UI never looks

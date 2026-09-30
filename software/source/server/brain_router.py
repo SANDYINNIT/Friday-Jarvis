@@ -19,6 +19,9 @@ import re
 import threading
 
 from . import api_pools
+from .file_logger import friday_logger as _friday_logger
+
+_flog = _friday_logger()
 
 GROQ_BASE = os.environ.get("FRIDAY_GROQ_BASE", "https://api.groq.com/openai/v1")
 OPENROUTER_BASE = os.environ.get("FRIDAY_OPENROUTER_BASE", "https://openrouter.ai/api/v1")
@@ -442,6 +445,33 @@ class BrainRouter:
         # Apply for the same text to get the next candidate (next model on
         # the same Gemini account, next key in a pool, or next provider)
         new_ticket = self.apply_for(user_text, interpreter)
+        if not new_ticket:
+            # DIAG (2026-09-30): observed live - Groq 429 twice, then
+            # "brain chain exhausted ... no candidate left" even though local
+            # qwen3:8b was never tried. Log exactly why the walk produced
+            # nothing, because the isolated repro returns local fine.
+            try:
+                remaining = [
+                    (pool, model)
+                    for pool, model, _base in resolve(user_text)
+                ]
+                reasons = []
+                for pool, model in remaining:
+                    if self._turn_skip(pool, model):
+                        reasons.append(f"{pool}/{model}: turn-skip")
+                    elif pool != "local" and api_pools.model_banned(pool, model):
+                        reasons.append(f"{pool}/{model}: model-banned")
+                    elif pool != "local":
+                        quota = api_pools.pool(pool)
+                        if quota is None or quota.empty:
+                            reasons.append(f"{pool}/{model}: no key")
+                _flog.warning(
+                    "failover found no candidate. turn_skips=%s skip_reasons=%s",
+                    sorted(self._turn_skipped),
+                    reasons or ["<none - all candidates looked usable>"],
+                )
+            except Exception as diag_error:
+                _flog.warning("failover diagnostic failed: %s", diag_error)
         if new_ticket:
             new_pool, new_key, new_model = new_ticket
             self._last_switch = (

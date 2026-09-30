@@ -303,6 +303,20 @@ class ScreenFollowUpContextTests(unittest.TestCase):
         ):
             self.assertTrue(regex.search(question), question)
 
+    def test_relative_clause_forms_match(self):
+        """People say "the application THAT IS OPEN", not "the open
+        application". Missing these produced a generic pixel description for a
+        perfectly clear question."""
+        regex = self._regex()
+        for question in (
+            "what does the application that is open do",
+            "what is the app that is open used for",
+            "what's the window that's open",
+            "what does the app you have open do",
+            "what does the open application do",
+        ):
+            self.assertTrue(regex.search(question), question)
+
     def test_unrelated_turns_do_not_match(self):
         regex = self._regex()
         for question in (

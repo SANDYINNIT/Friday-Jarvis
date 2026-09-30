@@ -157,6 +157,21 @@ LOCAL_VISION_CHAIN = [
 # The brain that composes the FINAL answer from the vision description
 # ("screenshot -> local vision -> Qwen3 reasoning -> response").
 SCREEN_BRAIN_MODEL = os.getenv("FRIDAY_SCREEN_BRAIN_MODEL", "qwen3:8b")
+# A 20-40 word photo caption does not need a 5 GB model. Measured on this
+# machine: qwen3:8b did not answer inside 45s, which left the caption EMPTY and
+# produced a canned acknowledgement. A 0.4 GB model answers this in ~10s.
+SCREEN_CAPTION_MODEL = os.getenv("FRIDAY_SCREEN_CAPTION_MODEL", "qwen2.5:0.5b")
+SCREEN_CAPTION_TIMEOUT_SECONDS = float(
+    os.getenv("FRIDAY_SCREEN_CAPTION_TIMEOUT", "12")
+)
+# The vision read is OFF by default for the photo-caption path. Measured: on a
+# dense desktop screenshot the 3B local vision model produced a confidently
+# WRONG description ("a webpage in a serif font") and cost ~17.6s, while
+# Tesseract plus the focused window title were both correct and cost ~1.5s.
+# Set FRIDAY_SCREEN_CAPTION_VISION=1 to include it anyway.
+SCREEN_CAPTION_USE_VISION = os.getenv("FRIDAY_SCREEN_CAPTION_VISION", "0") not in (
+    "0", "false", "False", "no", ""
+)
 # Short budget: the brain only REFINES the local caption. qwen3:8b on Sir's
 # CPU is ~10-20 tok/s warm, so a ~50-word spoken line lands in ~3-6s; keep_alive
 # 30m pins qwen3 + moondream resident so a cold 5.2GB reload (30-45s) only
@@ -629,26 +644,54 @@ def _select_regions(question):
 
 
 def _visible_window_titles(limit=8):
-    """Real window titles, so "what app is that?" has a factual anchor."""
+    """Real window titles, so "what app is that?" has a factual anchor.
+
+    `list_windows` returns Windows shell/taskbar entries with an EMPTY title,
+    and they dominate the head of the list - an earlier version filtered them
+    out only after slicing, so it returned [] and contributed nothing. Filter
+    FIRST, and always lead with the genuinely focused window.
+    """
+    titles = []
+    seen_titles = set()
     try:
         from .windows_control import list_windows
 
-        titles = []
-        for window in list_windows(limit=limit) or []:
+        # The active window is the single most useful fact, so put it first.
+        try:
+            active = get_active_window_context()
+        except Exception:
+            active = None
+        if isinstance(active, dict):
+            title = str(active.get("title") or "").strip()
+            process = str(active.get("process") or "").strip()
+            if title:
+                entry = f"- {title}"
+                if process and process.lower() not in title.lower():
+                    entry += f" ({process})"
+                titles.append(entry + "  [FOCUSED RIGHT NOW]")
+                seen_titles.add(title.lower())
+
+        for window in list_windows(limit=40) or []:
             if not isinstance(window, dict):
                 continue
             title = str(window.get("title") or "").strip()
             process = str(window.get("process") or "").strip()
-            if not title:
+            # Shell/taskbar pseudo-windows carry no title at all.
+            if not title or title in ("Program Manager", "Windows Input Experience"):
                 continue
+            # Dedupe on the TITLE, not the rendered line: the focused window
+            # comes back from list_windows too, and keying on the full string
+            # let it through a second time with a different process suffix.
+            if title.lower() in seen_titles:
+                continue
+            seen_titles.add(title.lower())
             entry = f"- {title}"
             if process and process.lower() not in title.lower():
                 entry += f" ({process})"
-            if entry not in titles:
-                titles.append(entry)
-        return titles[:limit]
+            titles.append(entry)
     except Exception:
-        return []
+        return titles[:limit]
+    return titles[:limit]
 
 
 def describe_screen(question=""):
@@ -1012,13 +1055,63 @@ def screen_response(question=""):
     return _screen_answer(report, window_context, question)[:SCREEN_RESPONSE_LIMIT]
 
 
-def capture_screen_jpeg():
-    """Fresh capture of ALL monitors -> JPEG bytes (for Telegram send-back)."""
-    import io as _io
+def _stack_regions_for_phone(regions):
+    """Stack monitor captures VERTICALLY for a phone.
 
-    image = _capture_screen()
-    buffer = _io.BytesIO()
-    image.convert("RGB").save(buffer, format="JPEG", quality=80)
+    Sir's complaint included "the screenshot it sent me was very low quality".
+    The bytes were full resolution, but a 3840x1080 side-by-side composite is
+    32:9, so on a phone it renders as a small letterboxed strip with tiny
+    unreadable text. Stacking the monitors gives a ~1080x2160 portrait image
+    that fills the screen and is actually legible. Thin separators and a label
+    bar keep each monitor identifiable.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return regions[0]["image"] if regions else None
+    if not regions:
+        return None
+    if len(regions) == 1:
+        return regions[0]["image"]
+
+    gap = 8
+    bar = 30
+    width = max(region["image"].size[0] for region in regions)
+    height = sum(region["image"].size[1] + bar for region in regions) + gap * (len(regions) - 1)
+    canvas = Image.new("RGB", (width, height), (16, 16, 16))
+    draw = ImageDraw.Draw(canvas)
+    top = 0
+    for position, region in enumerate(regions):
+        image = region["image"]
+        label = region.get("label") or f"Screen {position + 1}"
+        draw.rectangle([0, top, width, top + bar], fill=(32, 32, 32))
+        try:
+            draw.text((8, top + 8), label, fill=(235, 235, 235))
+        except Exception:
+            pass
+        top += bar
+        canvas.paste(image, (0, top))
+        top += image.size[1]
+        if position < len(regions) - 1:
+            top += gap
+    return canvas
+
+
+def capture_screen_jpeg():
+    """Fresh capture of every monitor -> JPEG bytes, for sending to Sir.
+
+    Monitors are stacked vertically rather than laid out side-by-side: a
+    3840x1080 composite is unreadable on a phone, and readability of the thing
+    he actually receives was the complaint.
+    """
+    regions = _capture_regions()
+    if not regions:
+        return b""
+    image = _stack_regions_for_phone(regions)
+    if image is None:
+        return b""
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=88)
     return buffer.getvalue()
 
 
@@ -1032,90 +1125,331 @@ def _photo_caption_brain(question, report, window_context=None):
     ocr = _extract_block(report, "OCR text:")
     if not description and not ocr:
         return ""
-    evidence = (description or ocr)[:700]
     win = ""
     if isinstance(window_context, dict):
         title = str(window_context.get("title") or "")
         process = str(window_context.get("process") or "")
         if title or process:
             win = f" Definite active window (trust this): {repr(title or process or '')}."
+
+    # EVIDENCE ORDER MATTERS, and getting it wrong is what produced a caption
+    # about "a webpage in a serif font" while OpenCode was actually focused.
+    # Measured on this machine: Tesseract read the screen correctly, while the
+    # 3B vision model hallucinated a webpage. So the focused window and the
+    # literal OCR text lead, and the vision description is explicitly marked as
+    # the least reliable input.
+    blocks = []
+    if ocr:
+        blocks.append("Text literally visible on screen (OCR, TRUST THIS):\n" + ocr[:600])
+    if description:
+        blocks.append(
+            "A vision model's description of the layout (LOWER confidence, it may "
+            "misread dense screens):\n" + description[:400]
+        )
+    evidence = "\n".join(blocks)
+    if not evidence.strip():
+        return ""
+
     prompt = (
-        "You are FRIDAY, Sir's personal assistant. You just captured your "
-        "own look at his computer screens, and this image is being sent to him "
-        "as a photo, so it sits right there beside your words.\n"
-        "Fresh visual description: " + evidence + win + "\n"
+        "You are FRIDAY, Sir's personal assistant. You just captured your own "
+        "look at his computer screens, and this image is being sent to him as a "
+        "photo, so it sits right there beside your words.\n"
+        + win + "\nEvidence:\n" + evidence + "\n"
         "Sir asked: " + (question or "send me a screenshot") + "\n\n"
         "Write the message for him in YOUR voice. STRICT rules:\n"
-        "- LEAD with what he is actually doing/looking at on screen right now "
-        "('You're on ...', 'opencode is the focused window ...'), grounded ONLY "
-        "in the description above.\n"
-        "- Do NOT say generic filler like 'a screenshot of a computer screen', "
-        "nor list monitors/'left and right'/'sections'.\n"
+        "- NAME the application from the focused window title, and say what the "
+        "visible text shows he is doing. If they disagree, believe the window "
+        "title and the OCR text.\n"
+        "- Never say 'a screenshot of a computer screen', never mention monitors, "
+        "'left'/'right'/'sections', fonts, or colours.\n"
         "- 1-2 SHORT sentences, ~20-40 words, warm, complete (always end punctuation)."
     )
-    try:
-        response = requests.post(
-            LOCAL_CHAT_URL,
-            json={
-                "model": SCREEN_BRAIN_MODEL,
-                "think": False,
-                "keep_alive": "30m",
-                "stream": False,
-                "messages": [{"role": "user", "content": prompt}],
-                "options": {"temperature": 0.5, "num_predict": 80, "num_ctx": 2048},
-            },
-            timeout=SCREEN_BRAIN_TIMEOUT_SECONDS,
-        )
-        if response.status_code >= 400:
-            return ""
-        text = (response.json().get("message", {}).get("content") or "").strip()
-    except Exception:
+    # A 20-40 word caption does not need a 5 GB model. qwen3:8b was measured
+    # TIMING OUT past 45s here, which is what left the caption empty and caused
+    # the canned acknowledgement. Use the small fast model for this job.
+    for model, budget in ((SCREEN_CAPTION_MODEL, SCREEN_CAPTION_TIMEOUT_SECONDS),
+                          (SCREEN_BRAIN_MODEL, SCREEN_BRAIN_TIMEOUT_SECONDS)):
+        try:
+            response = requests.post(
+                LOCAL_CHAT_URL,
+                json={
+                    "model": model,
+                    "think": False,
+                    "keep_alive": "30m",
+                    "stream": False,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "options": {"temperature": 0.4, "num_predict": 80, "num_ctx": 2048},
+                },
+                timeout=budget,
+            )
+            if response.status_code >= 400:
+                continue
+            text = (response.json().get("message", {}).get("content") or "").strip()
+        except Exception:
+            continue
+        sentence = _clean_sentence(text, limit=300)
+        if not sentence or _is_generic_vision(sentence.lower()):
+            continue
+        return _trim_to_sentence(sentence[:300])
+    return ""
+
+
+def _looks_like_real_text(candidate):
+    """Cheap plausibility gate for an OCR line before it is quoted to Sir.
+
+    Tesseract on a real desktop returns plenty of plausible-looking garbage
+    (measured: 'Ac (ERB SSEEEETD how nsnn-zo007\" +' from a Notepad window
+    that plainly said 'Quarterly Budget Review'). Quoting that is worse than
+    saying nothing, because it is confident and wrong. Real prose has several
+    words, a sane vowel ratio, and few long consonant runs.
+    """
+    import re as _re
+
+    text = " ".join(str(candidate or "").split())
+    if not text:
+        return False
+    words = [w for w in _re.findall(r"[A-Za-z]{2,}", text)]
+    if len(words) < 3:
+        return False
+    letters = [c.lower() for c in text if c.isalpha()]
+    if len(letters) < 8:
+        return False
+    vowels = sum(1 for c in letters if c in "aeiou")
+    ratio = vowels / float(len(letters))
+    if not (0.22 <= ratio <= 0.68):
+        return False
+    # Reject strings dominated by one repeated character/pattern.
+    if _re.search(r"(.)\1{4,}", text):
+        return False
+    # Tesseract's worst failures on dark UIs come out SHOUTING: 'Ac (ERB
+    # SSEEEETD how nsnn-zo007'. Real prose is mixed case, and a couple of
+    # long ALL-CAPS tokens is a strong garbage signal (one is fine - 'FRIDAY').
+    caps_words = [
+        w for w in words if len(w) >= 3 and w.isupper()
+    ]
+    if len(caps_words) >= 2:
+        return False
+    # Reject long consonant clusters that English rarely produces.
+    if _re.search(r"[bcdfghjklmnpqrstvwxz]{4,}", text, _re.IGNORECASE):
+        return False
+    # Reject lines that are mostly punctuation/paths.
+    if sum(1 for c in text if c.isalnum() or c.isspace()) / len(text) < 0.7:
+        return False
+    return True
+
+
+def _clean_ocr_snippet(ocr_text, limit=170):
+    """Readable, non-noisy slice of OCR for a caption.
+
+    The stacked capture draws a label bar per monitor, so OCR picks up FRIDAY's
+    OWN label text. Tesseract renders that bar at a small font and MERGES the
+    words ("the LEFTscreen", "PRIMARYdisplay"), so the pattern must tolerate a
+    missing space - the first version used `\\s+` and therefore kept the very
+    lines it was meant to drop.
+
+    Selection is by usefulness, not length: `max(len)` picked the longest line
+    on the screen, which on a developer machine is a shell command, not the
+    thing worth captioning. Prefer an early, headline-shaped line.
+    """
+    import re as _re
+
+    drop = _re.compile(
+        r"the\s*(?:only|left|right|middle)?\s*screen\b|primary\s*display|"
+        r"^\s*screen\s*\d*\s*$",
+        _re.IGNORECASE,
+    )
+    # Lines that are really paths, shell commands or code - useful on screen but
+    # useless as a caption about what Sir is doing.
+    noisy = _re.compile(r"[A-Za-z]:\\|\\\\|\b(?:py_compile|pytest|import |def |curl -|pip )\b")
+    candidates = []
+    for line in str(ocr_text or "").splitlines():
+        stripped = " ".join(line.split())
+        if not stripped or drop.search(stripped) or noisy.search(stripped):
+            continue
+        letters = sum(1 for ch in stripped if ch.isalnum())
+        if letters < max(6, len(stripped) * 0.5):
+            continue
+        candidates.append(stripped)
+    if not candidates:
         return ""
-    sentence = _clean_sentence(text, limit=300)
-    if not sentence:
-        return ""
-    if _is_generic_vision(sentence.lower()):
-        return ""
-    return _trim_to_sentence(sentence[:300])
+    headline = [
+        line for line in candidates
+        if 12 <= len(line) <= 90 and sum(1 for ch in line if ch.isalnum()) >= len(line) * 0.6
+    ]
+    # Only quote a line that passes the plausibility gate; prefer the earliest
+    # good one, since the top of a window is its title.
+    pool = headline or candidates
+    for line in pool:
+        if _looks_like_real_text(line):
+            return _re.sub(r"\s+", " ", line).strip(" -—|:;,")[:limit]
+    return ""
+
+
+
+def _grounded_photo_caption(ocr_text, window_context=None, titles=None):
+    """Deterministic-but-GROUNDED caption, used only when the brain cannot
+    answer inside its budget.
+
+    This is NOT a canned acknowledgement: every word comes from the actual
+    capture (the focused window title and the literal OCR text). It exists
+    because the alternative measured on this machine was a 45s timeout followed
+    by a canned string, and Sir's own policy forbids canned screen replies.
+    """
+    title = ""
+    if isinstance(window_context, dict):
+        title = str(window_context.get("title") or "").strip()
+    if not title and titles:
+        first = str(titles[0]).lstrip("- ").split("  [")[0]
+        title = first.split(" (")[0].strip()
+    snippet = _clean_ocr_snippet(ocr_text)
+    # The capture spans every monitor, so the readable text can come from any
+    # of them. Say "your screens" rather than implying a single display - being
+    # precise about what was actually captured is the whole point here.
+    if title and snippet:
+        return _trim_to_sentence(f"You're in {title} — and I can read “{snippet}” on your screens, Sir.")
+    if title:
+        return f"You're in {title}, Sir — that's what I've got."
+    if snippet:
+        return f"Straight off your screens, Sir: {snippet}."
+    return ""
 
 
 def author_screen_photo(jpeg_bytes, question=""):
     """AI-AUTHORED caption for a fresh screen photo being handed to Sir.
 
     The capture is only an infrastructure primitive; the CONTENT is authored
-    here: vision reads the actual image, then the brain (qwen3:8b) composes
-    a grounded caption from what it truly sees. Returns ``(caption, vision)``.
+    here and grounded in the real capture. Returns ``(caption, vision)``.
     ``vision`` is persisted for follow-up turns so "do you see your own
     screenshot?" is answered with real context, never "I don't see a
-    screenshot". Both are "" if the vision chain is cold.
+    screenshot". Both are "" only when nothing at all could be read.
+
+    ORDERING IS EVIDENCE-BASED (measured on this machine, 2026-09-30):
+      * Tesseract read the screen CORRECTLY and fast (~1.5s).
+      * The 3B vision model read the SAME screen WRONG (invented "a webpage in
+        a serif font" while OpenCode was focused) and took ~17.6s.
+      * qwen3:8b did not answer the caption prompt inside 45s, which is what
+        left the caption empty and caused the canned acknowledgement.
+    So the caption is built from the two reliable facts - the focused window
+    title and the literal OCR text - and the vision description is only
+    consulted when enabled, because on dense desktop screenshots it is the
+    least reliable input available.
     """
-    try:
-        vision = describe_image_bytes(jpeg_bytes, question)
-    except Exception:
-        vision = ""
-    if not vision or vision.startswith("I could not analyze"):
+    window_context = get_active_window_context()
+    titles = _visible_window_titles(limit=4)
+    ocr_text = _ocr_of_image(jpeg_bytes)
+
+    vision = ""
+    if SCREEN_CAPTION_USE_VISION:
+        try:
+            vision = describe_image_bytes(jpeg_bytes, question)
+        except Exception:
+            vision = ""
+        if vision.startswith("I could not analyze"):
+            vision = ""
+    vision_usable = bool(vision)
+
+    if not ocr_text and not titles and not vision_usable:
         return "", ""
-    report = "Visual description: " + vision.strip() + "\n"
+
+    report = ""
+    if ocr_text:
+        report += "OCR text: " + ocr_text + "\n"
+    if titles:
+        report += "Windows open: " + "; ".join(titles) + "\n"
+    if vision_usable:
+        report += "Visual description: " + vision.strip() + "\n"
+
+    # The reliable, grounded base line - always available in ~2s.
+    grounded = _grounded_photo_caption(ocr_text, window_context, titles)
+
+    # Let the brain try to make the line warmer, but only ACCEPT its version if
+    # it is grounded - it must not have drifted into generic vision filler, and
+    # when we know the focused app it has to actually mention it. Measured: a
+    # 0.5B model handed correct evidence still replied "a webpage in a serif
+    # font", so unverified acceptance is how a wrong caption ships.
+    caption = ""
     try:
-        caption = _photo_caption_brain(question, report, get_active_window_context())
+        caption = _photo_caption_brain(question, report, window_context) or ""
     except Exception:
         caption = ""
+    focused_title = ""
+    if isinstance(window_context, dict):
+        focused_title = str(window_context.get("title") or "").strip()
+    if caption:
+        low = caption.lower()
+        if _is_generic_vision(low) or "screenshot" in low or "webpage" in low:
+            caption = ""
+        elif focused_title and len(focused_title) > 3:
+            head = focused_title.split()[0].lower()
+            if head not in low:
+                caption = ""
     if not caption:
-        caption = _clean_sentence(vision.split("] ", 1)[-1] if "] " in vision else vision, limit=300)
+        caption = grounded
     if not caption:
         return "", ""
-    return _trim_to_sentence(caption[:1024]), vision.strip()
+    persisted = vision.strip() if vision_usable else ""
+    if not persisted:
+        # Persist a CLEAN, useful context blob. Storing raw OCR shipped
+        # FRIDAY's own monitor labels ("the LEFTscreen", "PRIMARY display")
+        # into the follow-up context, where the brain then quoted them back.
+        snippet = _clean_ocr_snippet(ocr_text, limit=400)
+        focused = ""
+        if isinstance(window_context, dict):
+            focused = str(window_context.get("title") or "").strip()
+        parts = []
+        if focused:
+            parts.append(f"Focused window: {focused}")
+        if snippet:
+            parts.append("Visible text: " + snippet)
+        if titles:
+            parts.append("Windows open: " + "; ".join(titles[:4]))
+        persisted = "\n".join(parts)
+    if not persisted:
+        return "", ""
+    return _trim_to_sentence(caption[:1024]), persisted
 
 
 def describe_image_bytes(jpeg_bytes, question=""):
     """Vision for arbitrary JPEG bytes (Telegram photos): local producer first,
-    then the cloud vision chain, then the bounded local deep-read fallback."""
+    then the cloud vision chain, then the bounded local deep-read fallback.
+
+    The image is fitted to the vision pixel budget FIRST. It used to be passed
+    through untouched, and a full 3840x1080 frame crashed the local encoder -
+    the project's own _downscale_jpeg comment recorded that "full-res frames
+    crashed qwen2.5vl's Vulkan encode on the RX 580". That silent failure is
+    why a screen photo could come back with NO description, which left the
+    caption empty and produced a canned acknowledgement - a policy violation
+    on top of a capability gap.
+    """
     prompt = (question or "").strip() or "What is in this image? Answer in one warm sentence."
-    ok, text, _error = _local_vision(prompt, jpeg_bytes)
+    try:
+        from PIL import Image
+
+        fitted = _fit_for_vision(Image.open(io.BytesIO(jpeg_bytes)))
+        buffer = io.BytesIO()
+        fitted.convert("RGB").save(buffer, format="JPEG", quality=88)
+        payload = buffer.getvalue()
+    except Exception:
+        payload = jpeg_bytes
+    ok, text, _error = _local_vision(prompt, payload)
     if ok and text:
         return f"[local] {text}"
     if api_pools.cloud_vision_enabled():
-        ok, text, provider, _error = _cloud_vision(jpeg_bytes, prompt)
+        ok, text, provider, _error = _cloud_vision(payload, prompt)
         if ok and text:
             return f"[{provider}] {text}"
+    return "I could not analyze that image right now, Sir - my vision chain is unavailable."
+
+
+def _ocr_of_image(jpeg_bytes, limit=2500):
+    """Best-effort OCR on raw screenshot bytes. Never raises."""
+    try:
+        from PIL import Image
+
+        text = pytesseract.image_to_string(
+            Image.open(io.BytesIO(jpeg_bytes))
+        ).strip()
+        return text[:limit]
+    except Exception:
+        return ""
     return "I could not analyze that image right now, Sir — my vision chain is unavailable."

@@ -299,6 +299,21 @@ def last_script(limit=2000):
     }
 
 
+def _brain_keepalive() -> dict:
+    """Is the local brain being kept resident, and is the ping working?
+
+    Worth exposing: a cold local model costs ~49s on this machine versus ~2.2s
+    warm, so "am I slow?" and "is the brain being kept warm?" are the same
+    question in practice.
+    """
+    try:
+        from . import brain_keepalive
+
+        return brain_keepalive.status()
+    except Exception as error:
+        return {"enabled": False, "running": False, "error": type(error).__name__}
+
+
 def self_state() -> dict:
     """Everything about her current runtime, read live. No secrets."""
     server_port = int(os.environ.get("FRIDAY_SERVER_PORT", "10101") or 10101)
@@ -316,6 +331,7 @@ def self_state() -> dict:
         },
         "local_brain": _ollama_models(),
         "models": runtime_models(),
+        "brain_keepalive": _brain_keepalive(),
         "cloud_pools": _api_pools(),
         "telegram": _telegram_state(),
         "n8n": _n8n_state(),

@@ -1,6 +1,8 @@
 """Focused tests for screen routing and vision/OCR result propagation."""
 
 import base64
+import os
+import pytest
 import io
 from types import SimpleNamespace
 
@@ -307,3 +309,136 @@ def test_describe_screen_runs_ocr_on_content_questions(monkeypatch):
     result = screen.describe_screen("what does the application do that is open?")
     assert "JIRA BOARD SPRINT 42" in result
     assert "Claude Code" in result, "real window titles must ground the answer"
+
+
+# ---------------------------------------------------------------------------
+# Photo caption integrity (2026-09-30)
+#
+# Sir received a Telegram screenshot captioned "Fresh screen capture for you,
+# Sir." - a canned acknowledgement that this project's own Screen/Vision/Media
+# policy forbids. Cause chain, all measured:
+#   1. capture_screen_jpeg() fed a full 3840x1080 frame to the local encoder,
+#      which is documented to crash qwen2.5vl's Vulkan encode on this GPU.
+#   2. The vision read returned nothing -> author_screen_photo returned "".
+#   3. server.py fell back to the canned string.
+# Plus: qwen3:8b did not answer the caption prompt inside 45s, and the 3B
+# vision model confidently misread the screen ("a webpage in a serif font")
+# while Tesseract read it correctly.
+# ---------------------------------------------------------------------------
+
+
+def test_canned_caption_string_is_gone_from_the_server():
+    import os as _os
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                        "source", "server", "server.py")
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    assert "Fresh screen capture for you" not in text, (
+        "the canned acknowledgement violates the Screen/Vision/Media policy"
+    )
+
+
+def test_ocr_never_raises_and_returns_text():
+    assert isinstance(screen._ocr_of_image(b"not-an-image"), str)
+
+
+def test_ocr_snippet_drops_our_own_monitor_labels():
+    """Tesseract merges the label bar into 'the LEFTscreen' (no space)."""
+    raw = "the LEFTscreen\nthe RIGHTscreen (thisisthe PRIMARY display)\nQuarterly Budget Review"
+    snippet = screen._clean_ocr_snippet(raw)
+    assert snippet == "Quarterly Budget Review"
+    assert "LEFTscreen" not in snippet
+    assert "PRIMARY" not in snippet
+
+
+def test_ocr_snippet_prefers_real_text_over_garbage():
+    raw = "Ac (ERB SSEEEETD how nsnn-zo007\" +\nQuarterly Budget Review"
+    assert screen._clean_ocr_snippet(raw) == "Quarterly Budget Review"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Quarterly Budget Review", True),
+        ("Revenue up 12 percent Chrome 86.4M Safari", True),
+        ("FRIDAY tool-calling streaming bug investigation", True),
+        ("Ac (ERB SSEEEETD how nsnn-zo007\" +", False),
+        ("the LEFTscreen", False),
+        ("= 32 =", False),
+        ("a", False),
+    ],
+)
+def test_real_text_gate(text, expected):
+    assert screen._looks_like_real_text(text) is expected
+
+
+def test_grounded_caption_names_the_focused_app():
+    caption = screen._grounded_photo_caption(
+        "Quarterly Budget Review\nRevenue up 12 percent",
+        {"title": "Notepad"},
+        ["- Notepad (Notepad.exe)  [FOCUSED RIGHT NOW]"],
+    )
+    assert "Notepad" in caption
+    assert "Quarterly Budget Review" in caption
+    assert "screenshot" not in caption.lower(), "never a canned ack"
+
+
+def test_grounded_caption_never_says_screenshot():
+    caption = screen._grounded_photo_caption("some readable words here now", {"title": "Edge"}, [])
+    assert "screenshot" not in caption.lower()
+
+
+def test_visible_window_titles_filters_empty_shell_entries(monkeypatch):
+    """list_windows is dominated by empty-title taskbar entries; filtering only
+    after slicing returned [] and contributed nothing."""
+    windows = [
+        {"title": "", "process": "explorer.exe"},
+        {"title": "", "process": "explorer.exe"},
+        {"title": "Real Window", "process": "app.exe"},
+    ]
+    monkeypatch.setattr(screen, "get_active_window_context", lambda: {"title": "Real Window"})
+    monkeypatch.setattr(
+        "source.server.windows_control.list_windows", lambda limit=40: windows
+    )
+    titles = screen._visible_window_titles(5)
+    assert any("Real Window" in t for t in titles)
+    assert titles[0].endswith("[FOCUSED RIGHT NOW]"), "the focused window must lead"
+    assert len(titles) == 1, "empty-title shell entries must be dropped"
+
+
+def test_caption_uses_a_small_fast_model_by_default():
+    """qwen3:8b timed out past 45s on the caption prompt."""
+    assert screen.SCREEN_CAPTION_MODEL
+    assert screen.SCREEN_CAPTION_MODEL != screen.SCREEN_BRAIN_MODEL
+    assert screen.SCREEN_CAPTION_TIMEOUT_SECONDS <= 20
+
+
+def test_vision_is_opt_in_for_the_caption_path():
+    assert screen.SCREEN_CAPTION_USE_VISION is False, (
+        "the 3B local vision model was measured wrong AND slow on dense screens"
+    )
+
+
+def test_author_screen_photo_never_raises_on_garbage_input():
+    caption, persisted = screen.author_screen_photo(b"", "send screenshot")
+    assert isinstance(caption, str) and isinstance(persisted, str)
+
+
+def test_stacked_capture_is_portrait_not_letterbox(monkeypatch):
+    """A 3840x1080 composite renders as an unreadable strip on a phone."""
+    from PIL import Image
+
+    a = {"label": "the LEFT screen", "image": Image.new("RGB", (1920, 1080), "white"),
+         "primary": False}
+    b = {"label": "the RIGHT screen", "image": Image.new("RGB", (1920, 1080), "black"),
+         "primary": True}
+    stacked = screen._stack_regions_for_phone([a, b])
+    assert stacked.size[1] > stacked.size[0], "stacked capture must be portrait-ish"
+    assert stacked.size[0] == 1920
+
+
+def test_single_monitor_capture_passes_through(monkeypatch):
+    from PIL import Image
+
+    only = {"label": "the only screen", "image": Image.new("RGB", (800, 600)), "primary": True}
+    assert screen._stack_regions_for_phone([only]).size == (800, 600)
