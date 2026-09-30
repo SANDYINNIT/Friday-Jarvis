@@ -9,19 +9,81 @@ and the CLI warmup can both call it safely.
 
 from __future__ import annotations
 
+import atexit
 import os
 import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
 
 DEFAULT_BASE_URL = "http://localhost:5050/v1"
-_KNOWN_PY312_PATHS = (
-    r"C:\Users\<USER-PC>\AppData\Local\Programs\Python\Python312\python.exe",
-)
+# How long to wait for a freshly spawned local TTS server before giving up.
+# Was hard-coded at 45s, which stalled the voice for ~a minute whenever the
+# server was not already running (measured 62s between tts_start and first
+# audio). Overridable with FRIDAY_TTS_STARTUP_WAIT.
+MAX_STARTUP_WAIT_SECONDS = float(os.environ.get("FRIDAY_TTS_STARTUP_WAIT", "12"))
+
+
+def _known_py312_paths():
+    """Candidate Python 3.12 interpreters, built from portable locations.
+
+    This used to hard-code one developer's absolute path, which leaked their
+    Windows username and machine name into a public repository. It is now
+    derived from %LOCALAPPDATA% / %ProgramFiles% / the `py` launcher, so it
+    works on any machine and ships no personal data.
+    """
+    import glob
+
+    candidates = []
+    local = os.environ.get("LOCALAPPDATA") or ""
+    program_files = os.environ.get("ProgramFiles") or ""
+    for root in (local, program_files):
+        if not root:
+            continue
+        pattern = os.path.join(root, "Programs", "Python", "Python*", "python.exe")
+        candidates.extend(glob.glob(pattern))
+
+    def _version(path):
+        # "Python312" -> 312, so a plain reverse sort puts 3.13 before 3.12.
+        import re as _re
+
+        match = _re.search(r"Python(\d+)", path)
+        return int(match.group(1)) if match else 0
+
+    # The edge-tts project needs 3.12; prefer exactly that, then the highest
+    # other version. A lexicographic sort once picked Python37 here.
+    def _rank(path):
+        return (1 if _version(path) == 312 else 0, _version(path))
+
+    candidates.sort(key=_rank, reverse=True)
+    # `py -3.12` launcher, resolved without spawning a process.
+    for launcher in (r"C:\Windows\py.exe", r"C:\Windows\pyw.exe"):
+        if os.path.isfile(launcher):
+            try:
+                out = subprocess.run(
+                    [launcher, "-3.12", "-c", "import sys; print(sys.executable)"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                resolved = (out.stdout or "").strip()
+                if resolved and os.path.isfile(resolved):
+                    candidates.append(resolved)
+            except Exception:
+                pass
+            break
+    # Deduplicate, keep order.
+    seen, unique = set(), []
+    for path in candidates:
+        if path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return tuple(unique)
+
+
+_KNOWN_PY312_PATHS = _known_py312_paths()
 _lock = threading.Lock()
 _started = False
 
@@ -101,19 +163,83 @@ def find_tts_python():
     return which("python")
 
 
-def _spawn_server(project_dir, python_exe):
-    creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-    return subprocess.Popen(
+def _spawn_server(project_dir, python_exe, base_url=None):
+    """Start the local edge-tts server, pinned to its own port.
+
+    TWO BUGS FIXED HERE (2026-09-30, found by inspecting a live orphan):
+
+    1. PORT COLLISION. The project reads its listen port from the `PORT`
+       environment variable (`PORT = int(os.getenv('PORT', 5050))` in
+       app/server.py). FRIDAY's own launcher sets `PORT=10101` to tell
+       FRIDAY which port to bind (start_friday.cmd: `set "PORT=%1"`), and a
+       spawned child INHERITS that value. The edge-tts server therefore bound
+       to 10101 - FRIDAY's own port - so FRIDAY could no longer start, and
+       `/ping` answered 404 from the TTS server instead. The child now gets an
+       explicit, sanitised PORT taken from the base_url we intend to use.
+
+    2. ORPHAN SURVIVAL. `DETACHED_PROCESS` let the server outlive FRIDAY and
+       keep holding the port after the user closed her. It is now a normal
+       child (no DETACHED_PROCESS), and registered for cleanup via
+       `atexit` so it is terminated when FRIDAY exits normally.
+    """
+    creationflags = subprocess.CREATE_NO_WINDOW
+    env = dict(os.environ)
+    # Pin the child to the port we actually probe/speak to, and never let it
+    # inherit FRIDAY's own PORT (which means something entirely different).
+    target = base_url or base_url_for_spawn()
+    parsed = urlparse(target)
+    if parsed.port:
+        env["PORT"] = str(parsed.port)
+        env["OPENAI_BASE_URL"] = f"http://localhost:{parsed.port}/v1"
+    process = subprocess.Popen(
         [python_exe, "app/server.py"],
         cwd=str(project_dir),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
         creationflags=creationflags,
     )
+    _register_child(process)
+    return process
 
 
-def ensure_edge_tts_server(base_url=DEFAULT_BASE_URL, timeout=45.0):
-    """Idempotently start the TTS server and wait until it responds."""
+_CHILDREN = []
+
+
+def _register_child(process):
+    """Track spawned servers so they are not left running after FRIDAY exits."""
+    _CHILDREN.append(process)
+    atexit.register(_terminate_children)
+
+
+def _terminate_children():
+    for process in list(_CHILDREN):
+        try:
+            if process.poll() is None:
+                process.terminate()
+        except Exception:
+            pass
+    _CHILDREN.clear()
+
+
+def base_url_for_spawn():
+    """The base URL the TTS server should be reachable on."""
+    return os.environ.get("OPENAI_BASE_URL", "http://localhost:5050/v1")
+
+
+def ensure_edge_tts_server(base_url=DEFAULT_BASE_URL, timeout=MAX_STARTUP_WAIT_SECONDS):
+    """Idempotently start the TTS server and wait until it responds.
+
+    The wait is bounded by MAX_STARTUP_WAIT_SECONDS (default 12s, overridable
+    with FRIDAY_TTS_STARTUP_WAIT). It was 45s, which meant a local server that
+    was never going to start silently held the voice for three quarters of a
+    minute on the last-resort path. A slow local voice is better than no voice,
+    but a 45s stall is not.
+
+    The spawned server is pinned to the port in `base_url` and is terminated
+    when FRIDAY exits, so it can neither steal FRIDAY's own port nor linger as
+    an orphan after she is closed.
+    """
     global _started
     with _lock:
         if _started:
@@ -127,7 +253,7 @@ def ensure_edge_tts_server(base_url=DEFAULT_BASE_URL, timeout=45.0):
             _started = True
             return False
         try:
-            _spawn_server(project_dir, python_exe)
+            _spawn_server(project_dir, python_exe, base_url=base_url)
         except Exception:
             _started = True
             return False

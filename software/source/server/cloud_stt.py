@@ -27,7 +27,7 @@ GEMINI_NATIVE_BASE = os.environ.get(
     "FRIDAY_GEMINI_NATIVE_BASE", "https://generativelanguage.googleapis.com/v1beta/models"
 )
 STT_TIMEOUT = float(os.environ.get("FRIDAY_STT_TIMEOUT", "30"))
-STT_CHAIN = ("stt_groq", "stt_deepgram", "stt_gemini")
+STT_CHAIN = ("stt_groq", "stt_deepgram", "gemini_stt")
 
 
 def pcm_to_wav(pcm, rate=16000, channels=1, sample_width=2):
@@ -137,7 +137,7 @@ def _call_stt(key, pool_name, wav_bytes):
         return _groq_transcribe(key, wav_bytes)
     if pool_name == "stt_deepgram":
         return _deepgram_transcribe(key, wav_bytes)
-    if pool_name == "stt_gemini":
+    if pool_name == "gemini_stt":
         return _gemini_transcribe(key, wav_bytes)
     return False, None, f"unknown stt pool {pool_name}", False
 

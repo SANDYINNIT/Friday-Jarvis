@@ -169,14 +169,19 @@ def throttle_wait_seconds(reason_text, max_wait=30.0):
 
 
 def _retry_after_seconds(reason_text, default_cooldown=None):
-    """Groq/OpenRouter 429s often carry 'Please try again in 17.3s'. Honor a
-    bounded version of that hint (min 20s, max 120s) so short TPM blips
-    recover quickly instead of locking the key away for 5 minutes."""
-    match = _RETRY_HINT_RE.search(str(reason_text or ""))
-    if not match:
+    """Honour a provider's own "try again in Ns" / "retry in Ns" hint.
+
+    FIX (2026-09-30): this used to be a SECOND, divergent parser that only
+    matched Groq/OpenRouter's "try again in" wording and clamped to 20-120s, so
+    Google's "Please retry in 29.68s" was ignored and the key got a flat 60s
+    instead of the time Google actually asked for. One parser now wins:
+    api_pools._retry_after_seconds, which handles both phrasings. The extra
+    3s padding is kept so we never come back a second too early.
+    """
+    hint = api_pools._retry_after_seconds(reason_text)
+    if hint is None:
         return None  # caller falls back to the pool default
-    seconds = float(match.group(1))
-    return max(20.0, min(120.0, seconds + 3.0))
+    return min(120.0, hint + 3.0)
 
 
 def classify(user_text):
@@ -232,9 +237,44 @@ def resolve(user_text):
     return chosen
 
 
+# Live serving state, published by BrainRouter and read by self_awareness so
+# FRIDAY can name the model that is REALLY answering (model self-awareness).
+_LIVE_ROUTER = {"router": None}
+
+
+def live_serving_state() -> dict:
+    """What model/pool/tier is serving turns RIGHT NOW (and what ran last).
+
+    Read-only and defensive: never raises, so self-reporting can never break a
+    turn. Returns counts/names only - never keys.
+    """
+    router = _LIVE_ROUTER.get("router")
+    if router is None:
+        return {"ready": False, "current_model": None, "current_pool": None,
+                "current_tier": None, "last_model": None, "last_pool": None,
+                "last_tier": None, "local_default": LOCAL_MODEL}
+
+    def _get(name, default=None):
+        try:
+            value = getattr(router, name, default)
+        except Exception:
+            return default
+        return value
+
+    return {
+        "ready": True,
+        "current_model": _get("current_model"),
+        "current_pool": _get("current_pool"),
+        "current_tier": _get("current_tier"),
+        "last_model": _get("last_model"),
+        "last_pool": _get("last_pool"),
+        "last_tier": _get("last_tier"),
+        "local_default": LOCAL_MODEL,
+    }
+
+
 class BrainRouter:
     """Applies the best current Brain candidate to an interpreter.llm."""
-
     def __init__(self, enabled=True):
         self._enabled = enabled
         self._current = None
@@ -246,6 +286,11 @@ class BrainRouter:
         self._last_model = None
         self._last_pool = None
         self._last_tier = None
+        # Publish to a module-level slot so self_awareness can report the model
+        # that is REALLY serving turns, without importing server.py (which
+        # would be circular). Sir asked for model self-awareness: she must be
+        # able to name the live model, not a guess from a static prompt.
+        _LIVE_ROUTER["router"] = self
         self._last_switch = "No provider switches yet."
         # THIS TURN's blacklist (pool_name, model): every candidate that
         # already failed once this turn is skipped — no bouncing back to
@@ -343,7 +388,15 @@ class BrainRouter:
                 pool_name_selected = pool_name
                 break
         if ticket is None:
+            # FIX (2026-09-29): the local fallback left `ticket` as None, so
+            # `self._current` was None and mark_failure() short-circuited on
+            # `if not ticket: return` — meaning a LOCAL brain failure was never
+            # recorded anywhere (no ledger, no console, no HUD). That silence is
+            # what let a fully dead chain spin unnoticed. The local candidate is
+            # now a real ticket like any other, so it is visible and honest, and
+            # failover_to_next() reports the chain is exhausted.
             self._configure(interpreter, None, LOCAL_BASE, None)
+            ticket = ("local", None, LOCAL_MODEL)
             model_name = LOCAL_MODEL
             pool_name_selected = "local"
         with self._lock:
@@ -398,7 +451,11 @@ class BrainRouter:
         else:
             self._last_switch = f"{old_label} exhausted everything -> local qwen3:8b"
         print(f"[brain switch] {self._last_switch}", flush=True)
-        return new_ticket is not None
+        # FIX (2026-09-29): report exhaustion truthfully. Falling back to LOCAL is
+        # the end of the cloud chain, not "another candidate found", so returning
+        # True here would make the caller keep hopping a turn that has nowhere
+        # left to go. Only a real cloud candidate counts as a successful hop.
+        return bool(new_ticket) and new_ticket[0] != "local"
 
     def mark_success(self):
         ticket = self.current
@@ -430,6 +487,17 @@ class BrainRouter:
 
         reason_text = str(reason or "")
         lowered_reason = reason_text.lower()
+        # The local candidate has no key pool and no model quota to cool. Record
+        # it honestly (console + scratchpad) and let the chain be exhausted -
+        # api_pools bookkeeping below would otherwise write meaningless
+        # "local:qwen3:8b" model-ban entries into the persisted ledger.
+        if pool_name == "local":
+            print(
+                f"[brain failover] local brain {model} failed: "
+                f"{api_pools.sanitize(reason_text)[:200]}",
+                flush=True,
+            )
+            return
         # Gemini 3's thought_signature validator hard-400s when the tool-call
         # history was generated by ANOTHER provider (Groq) — a history-format
         # problem, not a Gemini model death. Sanity-sanitized turns retry
@@ -445,7 +513,14 @@ class BrainRouter:
         )):
             api_pools.fail_model(pool_name, model, cooldown=300.0)
             return
-        model_level = pool_name == "brain_gemini" or (
+        # Model-level ban. FIX (2026-09-29): this used to fire for EVERY Gemini
+        # error, so five unrelated network blips could take the whole Gemini
+        # stage offline for the day. A model ban is now reserved for errors that
+        # genuinely indict the MODEL (quota/permission on that model id, or a
+        # stale slug); everything else falls through to the key-level paths
+        # below, which use short cooldowns.
+        gemini_model_dead = pool_name == "brain_gemini" and _reason_kills_model(reason_text)
+        model_level = gemini_model_dead or (
             pool_name == "brain_openrouter" and _reason_kills_model(reason_text)
         ) or (pool_name == "brain_groq" and "parse tool call" in reason_text.lower())
         if model_level:
@@ -456,19 +531,23 @@ class BrainRouter:
         elif _is_key_error(reason_text):
             quota_pool = api_pools.pool(pool_name)
             if quota_pool is not None:
-                # Exhaustion (429/TPM/RPD/etc.): 6-HOUR cooldown on that key
-                # (Sir directive) â€” persisted so restarts honor the window.
-                # The provider's own short retry hint ("try again in 6.6s")
-                # is still honored for tiny blips; big hints/daily quotas
-                # collapse into the 6-hour exhaustion window either way.
+                # A real quota signal is a short sliding-window burst far more
+                # often than a dead key, so start with the provider's hint (or a
+                # 60s window) and let the three-strikes rule escalate to the
+                # 6-hour window only if the key keeps doing it.
                 hint = _retry_after_seconds(reason_text)
-                cooldown = hint if (hint is not None and hint <= 120.0) else None
-                quota_pool.fail(key, cooldown=cooldown)
+                quota_pool.fail(key, cooldown=hint or api_pools.RATE_LIMIT_COOLDOWN_SECONDS)
             api_pools.model_succeed(pool_name, model)
         else:  # safe default: park the key only briefly; never hang the turn
             quota_pool = api_pools.pool(pool_name)
             if quota_pool is not None:
-                quota_pool.fail(key, cooldown=_retry_after_seconds(reason_text))
+                # FIX (2026-09-29): this branch is commented "park the key only
+                # briefly" but passed None whenever the provider gave no retry
+                # hint, and Pool.fail maps None to the FULL 6-hour window - so the
+                # documented safe default was the main source of 6h bans. An
+                # uncategorised error now gets a short cooldown.
+                quota_pool.fail(key, cooldown=_retry_after_seconds(reason_text)
+                                or api_pools.TRANSIENT_COOLDOWN_SECONDS)
             api_pools.model_succeed(pool_name, model)
         if reason:
             print(f"[brain failover] {pool_name}/{model} marked failed: {api_pools.sanitize(reason)[:200]}", flush=True)

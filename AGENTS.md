@@ -34,15 +34,17 @@ Windows build toolchain (optional): 21 of the frozen pins are sdist-only (`webrt
 
 ## Repository structure (software\)
 - `main.py` — entrypoint (server boot, livekit, auto-start hooks).
-- `source\server\` — the assistant: routing, STT/brain/TTS pools (`api_pools.py`), Open Interpreter integration, memory (`self_improve.py`, scratchpad/lessons in `~/.friday\`), profiles (`profiles\default.py`), remote control (`remote_telegram.py`), UI (`ui\`), LiveKit voice (`livekit\`).
+- `test_*.py` — FRIDAY's test suite (341 tests, no network/mic/API keys needed). Run `pytest` from `software\`; `pyproject.toml` sets `testpaths`/`norecursedirs` so it never walks `.venv`.
+- `source\server\` — the assistant: routing, STT/brain/TTS pools (`api_pools.py`), Open Interpreter integration, memory (`self_improve.py`, scratchpad/lessons in `~/.friday\`), self-awareness (`self_awareness.py`), health (`doctor.py`, `system_diagnostics.py`), tasks (`task_store.py`), optional n8n (`n8n_runtime.py`), profiles (`profiles\default.py`), remote control (`remote_telegram.py`), UI (`ui\`), LiveKit voice (`livekit\`).
 - `site-packages-patches\` — the 5 patched OI files this repo ships (also stamped into site-packages at install; the `tmp-oi\` wheel already bakes them in too).
 - `tmp-oi\` — patched open-interpreter wheel for the freeze.
 - `requirements_freeze.txt` / `pyproject.toml` — exact dependency closures; `poetry.lock` intentionally not shipped (first `poetry install` rebuilds it).
 
 ## Health & secrets
 - Never commit real keys. `dot_friday\api_credentials.json` and `*.db` are gitignored; after any API testing reset credential files to placeholders.
-- Keep the tree free of runtime debris: `__pycache__`, `*.db`, `*.log` do not belong here (they may exist in `.gitignore`).
-- Tests: none formal — boot + `GET /ping` → `pong`, then one voice turn (STT → brain → TTS) to smoke-test on a change.
+- No personal data in shipped code: no absolute developer paths, no usernames/machine names, no real handles. `tts_bootstrap.py` discovers the Python 3.12 interpreter from `%LOCALAPPDATA%`/`py` rather than a hard-coded path.
+- Keep the tree free of runtime debris: `__pycache__`, `*.db`, `*.log`, `software\screenshots\` do not belong here (all gitignored — delete them if a test run creates them).
+- Tests: `pytest` from `software\` is the primary check; boot + `GET /ping` → `pong` on a spare port (e.g. `--server-port 10102`) is the smoke test. Never run two instances at once — they share `~/.friday\` and will fight over the Telegram bot token (`409 Conflict`).
 
 ## Docs
 - `CONTEXT.md` (design philosophy — note: AGPL-3.0, NOT MIT), `ROADMAP.md`, `USES.md`. Fork freely.

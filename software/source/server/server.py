@@ -55,6 +55,11 @@ os.environ["INTERPRETER_REQUIRE_AUTH"] = "False"
 
 TEXT_CHANNEL_CHAT_ID = "@text-channel"
 
+# The most recent script FRIDAY wrote and ran this process, so she can be asked
+# "which script did you just use?" and answer with the real code instead of a
+# vague claim. Read by self_awareness.last_script(). No secrets: redacted.
+LAST_TOOL_SCRIPT = {}
+
 def emit_input_terminal(output_queue):
     """Release a light client whose audio request failed before dispatch."""
     output_queue.sync_q.put({"ignored": True, "end": True})
@@ -148,18 +153,18 @@ def _mark_turn_dispatch(server_state, interpreter, *, user, content, source):
     server_state["turn_content"] = content
     server_state["turn_source"] = source
     server_state["turn_retry_count"] = 0
+    # Provider-hop budget for this turn. Enforced for EVERY channel (voice,
+    # typed, Telegram) so a fully dead chain can never loop silently.
+    server_state["turn_hop_count"] = 0
     server_state["turn_failed"] = False
     server_state["turn_error"] = ""
     server_state["turn_messages_len"] = len(getattr(interpreter, "messages", []))
 
     # Turn-scoped blacklist reset: strict forward-only failover — the chain
     # never revisits a candidate that failed earlier in this turn.
-    try:
-        server_state["brain_router"].new_turn()
-    except Exception:
-        pass
 
     # Disk-backed turn scratchpad: survives provider hops (files are not
+
     # rewound with interpreter.messages) so each replay inherits what the
     # previous replays tried instead of repeating them blindly.
     try:
@@ -550,17 +555,53 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
     except Exception as ambient_error:
         _flog.info("ambient probe not installed: %s", ambient_error)
 
+    def queue_speech_only(content):
+        """Speak text without finalising the turn.
+
+        queue_direct_response() also emits `status: complete`, which is correct
+        for a standalone reply but WRONG while a turn is still live: Open
+        Interpreter emits its own end/complete afterwards and the turn is
+        finalised twice (which also clears the ban on a candidate we just
+        deliberately killed). The hard-stop path needs the voice without the
+        finalisation.
+        """
+        text = str(content or "")
+        if not text.strip():
+            return
+        interpreter.output_queue.sync_q.put({
+            "role": "assistant",
+            "type": "message",
+            "content": text,
+        })
+        interpreter.output_queue.sync_q.put({
+            "role": "assistant",
+            "type": "message",
+            "end": True,
+        })
+
     def queue_direct_response(content, *, record_activity=True):
         """Send deterministic adapter output through the normal response/TTS queue."""
+        text = str(content or "")
         if record_activity:
             # Deterministic replies have no LLM turn: the activity journal and
             # the telegram capture need the text handed over explicitly.
             remember_activity(content)
-            server_state["last_direct_text"] = str(content or "")
+            server_state["last_direct_text"] = text
+        # FIX (2026-09-30, second pass): this used to also call
+        # _record_turn_output directly, which DOUBLE-RECORDED the text - the
+        # message chunk we enqueue below is itself observed by new_output, which
+        # records it. That inflated snapshot_chars and duplicated the chat row.
+        # The enqueue is the single, correct recording path.
+        #
+        # Empty text: an empty message chunk is discarded downstream (no chat
+        # row, no TTS) and would leave /chat waiting for a reply that never
+        # arrives, so return before touching the queue.
+        if not text.strip():
+            return
         interpreter.output_queue.sync_q.put({
             "role": "assistant",
             "type": "message",
-            "content": content,
+            "content": text,
         })
         interpreter.output_queue.sync_q.put({
             "role": "assistant",
@@ -718,6 +759,16 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
     # instead of letting it loop for dozens of executions (Roblox loop: 91 runs).
     HARD_TOOL_CAP = int(float(os.getenv("FRIDAY_HARD_TOOL_CAP", "24")))
 
+    # Runaway-script guard. The tool CAP above only counts code blocks that emit
+    # a `start` event. A single script with an unbounded loop never ends, never
+    # increments that counter, and therefore defeats the cap entirely - the turn
+    # hangs forever and FRIDAY never replies. These two bounds catch it:
+    # a cap on console events, and a wall-clock ceiling for the whole turn.
+    TOOL_FLOOD_EVENT_CAP = int(float(os.getenv("FRIDAY_TOOL_FLOOD_CAP", "300")))
+    TOOL_WALL_CLOCK_LIMIT = float(os.getenv("FRIDAY_TURN_WALL_CLOCK", "240"))
+    # Per-turn guard state (reset for every turn).
+    turn_guard = {"started": time.monotonic(), "console_events": 0, "flood_stopped": False}
+
     # Pure conversational openers. When the user only greets/chats, the first
     # text reply IS the answer — the loop-engine merge would just echo it back.
     # Task/action requests are NOT openers, so they keep the one-merge nudge
@@ -771,6 +822,11 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             if _last.get("role") == "user":
                 llm_loop_guard["calls"] = 0
                 tool_counter["n"] = 0  # per-turn tool budget (fixes lifetime accumulation)
+                # Reset the runaway-script guard with the rest of the per-turn
+                # budget, so one bad turn cannot poison the next one.
+                turn_guard["started"] = time.monotonic()
+                turn_guard["console_events"] = 0
+                turn_guard["flood_stopped"] = False
             llm_loop_guard["calls"] += 1
             _assistant_text = _last.get("role") == "assistant" and _last.get("type") in (None, "message")
             if _assistant_text and llm_loop_guard["calls"] >= 2:
@@ -940,6 +996,26 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
             "chat_append role=%s chars=%s buffer_rows=%s bus=%s",
             role, len(text), len(buffer.snapshot()), id(status_bus),
         )
+
+    def chat_upsert_tool(content, key, status="complete"):
+        """Show/replace ONE tool row (e.g. the script FRIDAY just wrote).
+
+        The conversation stream previously appended a fresh row per fragment,
+        so a script streamed in many chunks was either invisible or spammed the
+        feed, and Sir could not see WHAT script was actually running - only
+        "OUT #1: python.exe". This rewrites a single keyed row in place so the
+        newest full text is always on screen.
+        """
+        if status_bus is None or not hasattr(status_bus, "chat"):
+            return
+        try:
+            status_bus.chat.upsert_tool(content, status=status, key=key)
+            _flog.info(
+                "chat_upsert_tool key=%s status=%s chars=%s",
+                key, status, len(str(content or "")),
+            )
+        except Exception as upsert_error:
+            _flog.info("chat_upsert_tool skipped: %s", type(upsert_error).__name__)
 
     def chat_finalize(snapshot_text=""):
         if status_bus is None or not hasattr(status_bus, "chat"):
@@ -1698,13 +1774,87 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                                 )
                             except Exception:
                                 pass
-                            server_state["brain_router"].failover_to_next(
+                            hopped = server_state["brain_router"].failover_to_next(
                                 interpreter, str(server_state.get("turn_user_text") or "request"),
                                 reason=turn_error,
                             )
+                            # FIX (2026-09-29): this branch used to `continue`
+                            # unconditionally and discard the failover result, so a
+                            # turn whose whole chain was dead re-dispatched forever
+                            # and FRIDAY said nothing at all. Voice and typed turns
+                            # never reached the retry budget below (it lived in a
+                            # Telegram-only block), which is why the HUD just showed
+                            # "FRIDAY is working" indefinitely. Now the budget is
+                            # enforced HERE, for every channel, and when it runs out
+                            # she says so plainly instead of going quiet.
+                            #
+                            # FIX (2026-09-30): `failover_to_next` returns False once
+                            # it lands on LOCAL (local is the end of the chain), so
+                            # testing that boolean alone made FRIDAY apologise
+                            # "every thinking model is unavailable" WITHOUT ever
+                            # running the local brain - defeating the whole point of
+                            # the fallback chain. The budget is about re-dispatching,
+                            # and landing on a real candidate - local included - is a
+                            # legitimate hop. Only give up when the router produced
+                            # no ticket at all, or we have genuinely run out of hops.
+                            hop_count = server_state.get("turn_hop_count", 0) + 1
+                            server_state["turn_hop_count"] = hop_count
+                            hop_max = max(1, _max_turn_retries())
+                            landed = getattr(server_state["brain_router"], "current", None)
+                            if not landed or hop_count > hop_max:
+                                _flog.error(
+                                    "brain chain exhausted after %s hop(s), no candidate "
+                                    "left: %s", hop_count, turn_error,
+                                )
+                                # FIX (2026-09-30): only penalise a candidate we
+                                # actually ASKED. The router has already applied the
+                                # next ticket by this point, and cooling that one
+                                # punishes an untried provider (potentially a
+                                # persisted 6h model ban on a candidate that never
+                                # ran). The failure belongs to the candidate that
+                                # was in place when the turn failed.
+                                if not landed or landed[0] == "local":
+                                    server_state["brain_router"].mark_failure(
+                                        reason=turn_error
+                                    )
+                                server_state["turn_error"] = ""
+                                server_state["turn_hop_count"] = 0
+                                publish_status(STATUS_IDLE, "Standing by")
+                                if not server_state["is_paused"]:
+                                    sorry = (
+                                        "Sorry, Sir - every thinking model I have is "
+                                        "unavailable right now, so I could not finish that. "
+                                        "Please try again in a moment."
+                                    )
+                                    queue_direct_response(sorry)
+                                    await _deliver_failure_notice(server_state, sorry)
+                                    # FIX (2026-09-30): clear the direct-text slot
+                                    # after delivering. queue_direct_response() sets
+                                    # last_direct_text, and the deterministic-reply
+                                    # block below re-sends that value to Telegram /
+                                    # the text channel, so leaving it set meant the
+                                    # phone got the SAME apology twice and the text
+                                    # channel kept a stale copy that answered the
+                                    # next /chat request.
+                                    server_state["last_direct_text"] = None
+                                continue
                             messages_len = server_state.get("turn_messages_len")
                             if messages_len is not None and len(getattr(interpreter, "messages", [])) > messages_len:
                                 interpreter.messages = interpreter.messages[:messages_len]
+                            # FIX (2026-09-30): the hop path re-dispatched with
+                            # raw old_input and never re-armed the turn log, so
+                            # every RETRIED turn was invisible to _record_turn_output
+                            # and always finalised as "snapshot_chars=0" even when
+                            # the chat feed held the full reply. That made the one
+                            # diagnostic for this class of bug report a lie. Re-arm
+                            # the turn so the snapshot reflects what she said.
+                            _begin_single_turn(
+                                self,
+                                server_state,
+                                user=server_state.get("turn_user_text") or "request",
+                                source=server_state.get("turn_source") or "text",
+                            )
+                            await asyncio.sleep(0.5)  # brief backoff before the next hop
                             await old_input({"role": "user", "type": "message", "start": True})
                             await old_input({"role": "user", "type": "message", "content": server_state.get("turn_content")})
                             await old_input({"role": "user", "type": "message", "end": True})
@@ -1880,6 +2030,34 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
 
                 delimiters = ".?!;,\n…)]}"
 
+                # ---- WHERE THE SCRIPT ACTUALLY ARRIVES (2026-09-30) -----------
+                # Open Interpreter sends the code as a `code` event whose
+                # payload key is `content`, NOT `code`. Verified live by
+                # logging every output type:
+                #   type='code' format='python' keys=['content','format','role','type']
+                # FRIDAY only ever read `output.get("code")`, which never
+                # exists, so `tool_code_parts` stayed EMPTY for the life of the
+                # project and the "TOOL #n result" row was unreachable dead
+                # code. That is exactly why Sir only ever saw
+                # "OUT #1: python.exe" and never the script itself.
+                if isinstance(output, dict) and output.get("type") == "code":
+                    _script_payload = output.get("code") or output.get("content")
+                    if _script_payload and not output.get("end"):
+                        fragment = str(_script_payload)
+                        tool_code_parts.clear()
+                        tool_code_parts.append(fragment)
+                        _flog.info(
+                            "tool script captured: format=%s chars=%s",
+                            output.get("format"), len(fragment),
+                        )
+                        chat_upsert_tool(
+                            f"TOOL #{tool_counter['n']} — script "
+                            f"({output.get('format') or 'code'}, {len(fragment)} chars):\n"
+                            f"{fragment[:2000]}",
+                            key=f"tool-{tool_counter['n']}-code",
+                            status="streaming",
+                        )
+
                 if isinstance(output, dict) and output.get("type") == "code":
                     # Accumulate streamed code fragments so the console and
                     # log show WHAT tool is actually running instead of the
@@ -1896,6 +2074,15 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         joined_preview = "".join(tool_code_parts).strip()
                         if joined_preview:
                             _flog.info("tool code so far: %s", _redact_text(joined_preview)[:600])
+                            # Show the ACTUAL script as it streams into a single
+                            # live row, so Sir can always see which code FRIDAY
+                            # is running instead of an opaque "python.exe".
+                            chat_upsert_tool(
+                                f"TOOL #{tool_counter['n']} — {str(output.get('language') or 'code')} "
+                                f"(streaming, {len(joined_preview)} chars):\n{joined_preview[:1500]}",
+                                key=f"tool-{tool_counter['n']}-code",
+                                status="streaming",
+                            )
                     if output.get("start"):
                         tool_code_parts.clear()
                         tool_counter["n"] += 1
@@ -1937,6 +2124,17 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                             )
                             chat_append("tool", f"HARD STOP at tool #{tool_counter['n']} — loop terminated", status="complete")
                             _capture = server_state.get("telegram_capture")
+                            if _capture is None:
+                                # FIX (2026-09-30): a LOCAL voice/desk turn that
+                                # hit the hard tool cap used to get NOTHING - the
+                                # wrap only went to Telegram or the text queue, so
+                                # FRIDAY killed the turn and went silent. She now
+                                # says it out loud locally too. Speech-only: the
+                                # turn is still live and OI will emit its own
+                                # completion, so sending `complete` here too would
+                                # finalise the turn twice and clear the ban on the
+                                # candidate we just deliberately stopped.
+                                queue_speech_only(wrap)
                             if _capture is not None and str(_capture.get("chat_id") or ""):
                                 _c_chat_id = str(_capture.get("chat_id"))
                                 if _c_chat_id == TEXT_CHANNEL_CHAT_ID:
@@ -1964,7 +2162,11 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         language = str(output.get("language") or "code").strip()
                         tool_label = f"Tool #{tool_counter['n']} ({language})"
                         _flog.info("tool start: %s", tool_label)
-                        chat_append("tool", f"TOOL #{tool_counter['n']} — writing {language}...", status="streaming")
+                        chat_upsert_tool(
+                            f"TOOL #{tool_counter['n']} — writing {language}...",
+                            key=f"tool-{tool_counter['n']}-code",
+                            status="streaming",
+                        )
                         try:
                             print(f"[Tool #{tool_counter['n']} starting: writing {language}]", flush=True)
                         except Exception:
@@ -1977,7 +2179,20 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                         success = output.get("success", True)
                         if tool_code:
                             _flog.info("tool complete: success=%s code=%s", success, _redact_text(tool_code)[:800])
-                            chat_append("tool", f"TOOL #{tool_counter['n']} result:\n{tool_code[:1200]}", status="complete")
+                            global LAST_TOOL_SCRIPT
+                            LAST_TOOL_SCRIPT = {
+                                "tool_number": tool_counter["n"],
+                                "language": language,
+                                "success": bool(success),
+                                "code": _redact_text(tool_code)[:4000],
+                                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                            chat_upsert_tool(
+                                f"TOOL #{tool_counter['n']} — script ({len(tool_code)} chars, "
+                                f"{'ok' if success else 'FAILED'}):\n{tool_code[:2000]}",
+                                key=f"tool-{tool_counter['n']}-code",
+                                status="complete",
+                            )
                             try:
                                 print(f"[Tool #{tool_counter['n']} {'OK' if success else 'FAILED'} code]\n{tool_code[:2000]}", flush=True)
                             except Exception:
@@ -2035,6 +2250,83 @@ def start_server(server_host, server_port, interpreter, voice, debug, status_bus
                 if isinstance(output, dict) and output.get("type") == "console" and output.get("content"):
                     # Show what the executed code printed/returned.
                     console_text = str(output.get("content") or "").strip()
+                    # ---- INFINITE-LOOP / FLOOD GUARD (2026-09-30) -------------
+                    # Observed live: after a Groq 429 failover, the brain wrote
+                    # python containing an unbounded loop that printed "Task is
+                    # not complete. Continuing..." forever. Because no `end`
+                    # event ever arrived, the tool counter NEVER advanced, so
+                    # the tool-cap loop guard could not fire and the turn hung
+                    # indefinitely - FRIDAY simply never answered. The counter
+                    # is the wrong place to catch this, so bound BOTH the
+                    # number of console events and the total time in the turn.
+                    turn_guard["console_events"] = turn_guard.get("console_events", 0) + 1
+                    elapsed = time.monotonic() - turn_guard["started"]
+                    over_events = turn_guard["console_events"] > TOOL_FLOOD_EVENT_CAP
+                    over_time = elapsed > TOOL_WALL_CLOCK_LIMIT
+                    if over_events or over_time:
+                        if not turn_guard.get("flood_stopped"):
+                            turn_guard["flood_stopped"] = True
+                            reason = (
+                                f"{turn_guard['console_events']} console events"
+                                if over_events
+                                else f"{int(elapsed)}s wall clock"
+                            )
+                            _flog.warning(
+                                "tool flood/stall guard tripped (%s) — killing turn", reason
+                            )
+                            publish_status(
+                                STATUS_ERROR,
+                                "Stopped a runaway script so I could answer you",
+                            )
+                            chat_append(
+                                "tool",
+                                f"RUNAWAY SCRIPT STOPPED ({reason}) — the code was "
+                                f"looping instead of finishing",
+                                status="complete",
+                            )
+                            try:
+                                interpreter.stop_event.set()
+                            except Exception:
+                                pass
+                            # Tell the truth rather than go silent: this turn is
+                            # being killed, so nothing downstream will speak for
+                            # her. Mirrors the HARD tool-cap path.
+                            flood_wrap = (
+                                "I stopped that myself - the code I wrote started "
+                                "looping instead of finishing, so I killed it rather "
+                                "than hang. Ask me again and I'll take a direct route."
+                            )
+                            try:
+                                queue_speech_only(flood_wrap)
+                            except Exception:
+                                pass
+                            _flood_capture = server_state.get("telegram_capture")
+                            if _flood_capture is not None and str(
+                                _flood_capture.get("chat_id") or ""
+                            ):
+                                _f_chat_id = str(_flood_capture.get("chat_id"))
+                                if _f_chat_id == TEXT_CHANNEL_CHAT_ID:
+                                    server_state.setdefault("text_reply_queue", asyncio.Queue())
+                                    await server_state["text_reply_queue"].put(flood_wrap)
+                                    server_state["telegram_capture"] = None
+                                    server_state["telegram_turn_mute"] = False
+                                else:
+                                    try:
+                                        await telegram_adapter.send_text(_f_chat_id, flood_wrap)
+                                    except Exception as flood_send_error:
+                                        _flog.warning(
+                                            "flood-stop notice failed: %s", flood_send_error
+                                        )
+                                    server_state["telegram_capture"] = None
+                                    server_state["telegram_turn_mute"] = False
+                        # Keep the log, but stop flooding it and the feed.
+                        if turn_guard["console_events"] % 50 == 0:
+                            _flog.info(
+                                "tool console suppressed after runaway stop (%s total)",
+                                turn_guard["console_events"],
+                            )
+                        _record_turn_output(server_state, output)
+                        continue
                     _showable = bool(console_text) and not _console_noise(console_text)
                     if console_text and not _showable:
                         _flog.info("tool console(noise): %s", _redact_text(console_text)[:200])

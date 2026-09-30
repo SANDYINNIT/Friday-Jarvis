@@ -178,6 +178,36 @@ class ChatBuffer:
             self._messages.append(message)
         return dict(message)
 
+    def upsert_tool(self, content, status="complete", key=None):
+        """Create or REPLACE a tool row in place, keyed by `key`.
+
+        Tool output (notably the script FRIDAY wrote) arrives in many small
+        fragments. Appending one row per fragment spams the conversation
+        stream, and a plain append means the last state of a long script is
+        never visible if the turn ends abruptly. This keeps exactly ONE row per
+        `key` and rewrites its content as the value grows, so the feed always
+        shows the newest full text of that step.
+
+        Returns the stored message dict.
+        """
+        content = str(content or "")[:12000]
+        with self._lock:
+            if key is not None:
+                for message in reversed(self._messages):
+                    if message["role"] == "tool" and message.get("key") == key:
+                        message["content"] = content or message["content"]
+                        message["status"] = str(status)
+                        return dict(message)
+            message = {
+                "role": "tool",
+                "content": content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": str(status),
+                "key": key,
+            }
+            self._messages.append(message)
+            return dict(message)
+
     def snapshot(self):
         with self._lock:
             return [dict(message) for message in self._messages]
@@ -682,7 +712,9 @@ class WebviewBridge:
             "Web: Bing search + live page/doc fetching (requests + stdlib HTMLParser)",
             "Memory: SQLite friday_memory.db, automatic extraction, project notes",
             "Reminders: SQLite friday_reminders.db, polling worker, spoken delivery",
-            "Diagnostics: watchdog reset, proactive welcome-back scan, system stats",
+            "Tasks: SQLite friday_tasks.db, add/list/complete/delete, natural-language due dates",
+            "Diagnostics: CPU/RAM/disk/processes/services/network, health verdict, watchdog reset",
+            "Automation: optional n8n webhook workflows (off until connected; FRIDAY falls back to her own tools)",
         ]
         return sections
 
@@ -758,6 +790,7 @@ class WebviewBridge:
             from . import api_pools
             pools_stats = api_pools.describe_pools()
         except Exception:
+            api_pools = None
             pools_stats = {}
 
         def get_pool_health(pool_name):
@@ -1005,6 +1038,39 @@ class WebviewBridge:
             "health_desc": "Always Available (Local Server)",
         })
 
+        # 14. Optional n8n workflow automation. OFF by default; when it is not
+        # connected FRIDAY simply does the work with her own built-in resources,
+        # so this panel reports "unconfigured" rather than a fault.
+        n8n_status = "no-keys"
+        n8n_desc = "Unconfigured (No n8n Workflows)"
+        n8n_workflows = 0
+        try:
+            from . import n8n_runtime as _n8n
+
+            _adapter = _n8n.get_adapter()
+            _snap = _adapter.status()
+            n8n_workflows = _snap.get("workflow_count", 0)
+            if not _snap.get("enabled"):
+                n8n_desc = "Not Connected (FRIDAY uses her own tools)"
+            else:
+                reachable = _adapter.available().get("connected")
+                n8n_status = "available" if reachable else "exhausted"
+                n8n_desc = (f"Connected - {n8n_workflows} workflow(s) available"
+                            if reachable else "Configured but not answering")
+        except Exception:
+            pass
+        agents.append({
+            "id": "agent-n8n-workflows",
+            "name": "n8n Workflow Automation",
+            "role": "External Workflow Engine (Optional)",
+            "provider": "n8n",
+            "model": f"{n8n_workflows} workflow(s)" if n8n_workflows else "none configured",
+            "status": n8n_status,
+            "task": "Ready to hand over workflow tasks" if n8n_status == "available" else "Standby (FRIDAY handles the task herself)",
+            "description": "Optional external automation server. Off until the owner connects it; FRIDAY never depends on it.",
+            "health_desc": n8n_desc,
+        })
+
         return {
             "agents": agents,
             "summary": {
@@ -1014,7 +1080,12 @@ class WebviewBridge:
                 "active_provider": active_pool or last_pool or "None (Standby)",
                 "active_tier": active_tier or last_tier or "normal",
                 "last_switch": getattr(router, "last_switch", None) or "No provider switches yet.",
-                "exhaustion_ledger": api_pools.ledger() if "api_pools" in str(type(router).__module__) else {},
+                # FIX (2026-09-29): this was gated on `"api_pools" in
+            # str(type(router).__module__)`, but a BrainRouter's module is
+            # "source.server.brain_router", so the condition was never true and
+            # the per-model cooldown display was permanently empty. api_pools is
+            # already imported defensively above, so call it directly.
+            "exhaustion_ledger": api_pools.ledger() if api_pools is not None else {},
             }
         }
 

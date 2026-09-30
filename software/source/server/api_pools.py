@@ -18,12 +18,13 @@ The file schema is an object keyed by pool name, each value a list of keys:
       "deepgram":        ["f953..."]
     }
 
-See dot_friday\api_credentials.example.json for the ready-made template.
+See api_credentials.example.json for the ready-made template.
 """
 
 import json
 import os
 import re
+import hashlib
 import threading
 import time
 
@@ -80,6 +81,52 @@ POOL_MIN_INTERVALS = {
 # candidate inherits the rotation in the meantime.
 _EXHAUSTION_COOLDOWN = float(os.environ.get("FRIDAY_API_COOLDOWN", "21600"))
 _COOLDOWN_SECONDS = _EXHAUSTION_COOLDOWN
+
+# Short cooldowns (2026-09-29). A free tier 429 is a per-minute sliding-window
+# burst, not a dead key, so it gets a short cool-down and only escalates to the
+# 6-hour window after the strike rule trips. A transient failure (timeout, 5xx)
+# gets an even shorter one, so a permanently broken provider stops costing a
+# request on every turn instead of being retried forever.
+RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+TRANSIENT_COOLDOWN_SECONDS = 45.0
+_RETRY_AFTER_MIN = 5.0
+_RETRY_AFTER_MAX = 300.0
+
+
+def _retry_after_seconds(error_text):
+    """Pull a provider's own "try again in Ns" hint out of an error string.
+
+    Handles both common phrasings:
+      * Groq / OpenAI style : "Please try again in 6.6s"
+      * Google style        : "Please retry in 29.683900996s."
+    Returns None when the provider gave no usable hint, so the caller can fall
+    back to its own short cooldown instead of a 6-hour ban.
+    """
+    if not error_text:
+        return None
+    text = str(error_text).lower()
+    for marker in ("try again in", "retry in"):
+        start = text.find(marker)
+        if start < 0:
+            continue
+        tail = text[start + len(marker):].lstrip(" :")
+        digits = ""
+        for char in tail:
+            if char.isdigit() or char in ".,":
+                digits += char
+            else:
+                break
+        # normalise "29.683900996" / "29,68" style decimals
+        try:
+            seconds = float(digits.replace(",", "."))
+        except ValueError:
+            continue
+        if seconds <= 0:
+            continue
+        return max(_RETRY_AFTER_MIN, min(seconds, _RETRY_AFTER_MAX))
+    return None
+
+
 _LEDGER_PATH = os.path.join(
     os.path.expanduser("~"), ".friday", "exhaustion_ledger.json"
 )
@@ -90,9 +137,22 @@ _ledger_lock = threading.Lock()
 _ledger_restore_done = False
 
 
+def _key_fingerprint(key):
+    """Stable, non-reversible identifier for an API key.
+
+    SECURITY (2026-09-29): the ledger used to persist the FULL key
+    ("gsk_...", "sk-or-v1-...", "AIza...") in plaintext, rewritten on every
+    success and every failure, which contradicted this module's own promise
+    that keys are never written anywhere. Only a digest is stored now, so a
+    stolen ledger is useless without the live credentials.
+    """
+    return hashlib.sha256(str(key).encode("utf-8", "replace")).hexdigest()[:16]
+
+
 def _persist_ledger(path=None):
     """Write remaining cooldown minutes for keys and models (persisted so the
-    6-hour exhaustion windows survive restarts)."""
+    6-hour exhaustion windows survive restarts). Keys are stored as digests,
+    never in plaintext."""
     try:
         save_path = str(path or _LEDGER_PATH)
         now = time.monotonic()
@@ -102,7 +162,7 @@ def _persist_ledger(path=None):
             with quota_pool._lock:
                 for index, until in quota_pool._banned_until.items():
                     if until > now and index < len(quota_pool._keys):
-                        ident = f"{name}:{quota_pool._keys[index]}"
+                        ident = f"{name}:{_key_fingerprint(quota_pool._keys[index])}"
                         snapshot["keys"][ident] = round((until - now) / 60.0, 1)
         with _model_ban_guard:
             for (pool_name, model), until in sorted(_model_bans.items()):
@@ -127,11 +187,19 @@ def _restore_ledger():
     pools = _pools or {}
     for ident, minutes_left in (snapshot.get("keys") or {}).items():
         try:
-            pool_name, key = ident.split(":", 1)
+            pool_name, key_ref = ident.split(":", 1)
             quota_pool = pools.get(pool_name)
-            if quota_pool is None or key not in quota_pool._keys:
+            if quota_pool is None:
                 continue
-            index = quota_pool._keys.index(key)
+            # Accept both the new digest form and a legacy plaintext entry so an
+            # existing ledger keeps working; the next write re-hashes it.
+            index = None
+            for candidate, raw in enumerate(quota_pool._keys):
+                if _key_fingerprint(raw) == key_ref or raw == key_ref:
+                    index = candidate
+                    break
+            if index is None:
+                continue
             if minutes_left > 0:
                 quota_pool._banned_until[index] = now + minutes_left * 60.0
                 restored += 1
@@ -151,7 +219,10 @@ def _restore_ledger():
 
 
 def ledger():
-    """Expose the current exhaustion ledger (identifiers + minutes left)."""
+    """Expose the current exhaustion ledger (identifiers + minutes left).
+
+    Key entries are digests, never any part of a live key.
+    """
     now = time.monotonic()
     out = {"keys": {}, "models": {}}
     pools = _ensure_pools()
@@ -159,7 +230,7 @@ def ledger():
         with quota_pool._lock:
             for index, until in quota_pool._banned_until.items():
                 if until > now and index < len(quota_pool._keys):
-                    out["keys"][f"{name}:{quota_pool._keys[index][:8]}…"] = round((until - now) / 60.0, 1)
+                    out["keys"][f"{name}:{_key_fingerprint(quota_pool._keys[index])}"] = round((until - now) / 60.0, 1)
     with _model_ban_guard:
         for (pool_name, model), until in sorted(_model_bans.items()):
             if until > now:
@@ -314,16 +385,26 @@ class Pool:
     def succeed(self, key):
         with self._lock:
             try:
-                self._banned_until.pop(self._keys.index(key), None)
+                index = self._keys.index(key)
             except ValueError:
-                pass
+                index = None
+            if index is not None:
+                self._banned_until.pop(index, None)
+            # FIX (2026-09-29): a real success RESETS the strike counter. It used
+            # to be left untouched, so three unlucky failures spread over days
+            # (each with a success in between) promoted to a 6-hour ban and
+            # contradicted this class's own "3rd failure IN A ROW" contract.
+            self._strikes.pop(key, None)
         _persist_ledger()
 
     def fail(self, key, cooldown=None):
-        """Cooldown a key. Strike counter: the 3rd failure in a row without
-        a FULL successful turn promotes the cooldown to the full 6-hour
-        exhaustion window (persisted), so flaky keys cannot ping-pong the
-        chain with 20-120s turtle-hops forever."""
+        """Cooldown a key. Strike counter: the 3rd failure IN A ROW (no
+        successful call since the last failure) promotes the cooldown to the
+        full 6-hour exhaustion window (persisted), so flaky keys cannot
+        ping-pong the chain with 20-120s turtle-hops forever, and a genuinely
+        dead key eventually leaves the rotation instead of costing a request
+        on every turn. `succeed()` resets the counter, so a key that recovers
+        is trusted again immediately."""
         with self._lock:
             try:
                 index = self._keys.index(key)
@@ -331,7 +412,8 @@ class Pool:
                 return
             effective = cooldown or self._cooldown
             strikes = self._strikes.get(key, 0) + 1
-            if cooldown is not None and cooldown <= 120.0 and strikes >= 3:
+            short_window = effective < self._cooldown
+            if short_window and strikes >= 3:
                 # Three short-window failures in a row = chronic exhaustion.
                 effective = max(effective, self._cooldown)
                 strikes = 0
@@ -440,9 +522,24 @@ def run_chain(pool_names, call, on_result=None):
                 quota_pool.succeed(key)
                 return True, payload, pool_name, ""
             if quota_failure:
-                quota_pool.fail(key)
+                # FIX (2026-09-29): this used to call fail(key) with no cooldown,
+                # which is a FULL 6-hour ban, persisted across restarts. On a free
+                # tier a 429 is almost always a per-minute sliding-window burst -
+                # the exact thing POOL_MIN_INTERVALS exists to soften - so one
+                # burst could take a whole pool offline for six hours. Now:
+                #   * honour the provider's own retry hint when it offers one
+                #   * otherwise use a short window cooldown, and let the
+                #     three-strikes rule escalate to 6h only for a key that
+                #     keeps doing it (see Pool.fail)
+                cooldown = _retry_after_seconds(error) or RATE_LIMIT_COOLDOWN_SECONDS
+                quota_pool.fail(key, cooldown=cooldown)
                 last_error = sanitize(f"{error}") if error else f"quota exhausted on {pool_name}"
             else:
+                # Transient failure (timeout, 5xx, bad JSON). Previously NOTHING
+                # was recorded, so a provider that is permanently broken cost a
+                # full failing request on EVERY subsequent turn, forever. Now the
+                # strike counter escalates it out of rotation after a few tries.
+                quota_pool.fail(key, cooldown=TRANSIENT_COOLDOWN_SECONDS)
                 last_error = sanitize(f"{error}") if error else f"failed on {pool_name}"
     return False, None, "", last_error
 

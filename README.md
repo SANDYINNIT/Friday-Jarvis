@@ -11,10 +11,12 @@
 
 - **Talk to you** — full voice loop: wake word → speech-to-text → brain → tool use → text-to-speech, with a JARVIS/FRIDAY-style personality (`KAREN` warmth mixed in).
 - **Work your computer** — open/close apps, focus windows, type, click, read your screen (screenshot → OCR/vision), control media, manage Wi-Fi tasks, run PowerShell/Python.
+- **Show her work** — every script she writes and runs is displayed live in the Chat stream (`TOOL #n — script (python, N chars)`), and she can repeat or explain the last one on request. No more "it ran some code" black boxes.
+- **Know what she knows** — ask her which model is answering, which speech-to-text engine is listening, or which TTS voice spoke, and she checks her **live** runtime instead of guessing. She also has a `doctor` that reports exactly which brain tiers, STT engines and TTS providers work right now.
 - **Use models smartly** — a default local brain (`qwen3:8b` via Ollama) with automatic failover to cloud providers (Groq, OpenRouter, Gemini, Deepgram) when the local model can't handle it or gets rate-limited. Cloud quota pools keep each API key locked to one job.
-- **Remember things** — SQLite memory, a lessons file injected live into her system prompt every turn, note-taking, calendar scheduling, and a self-improvement loop.
+- **Remember things** — SQLite memory, a lessons file injected live into her system prompt every turn, note-taking, calendar scheduling, a task list, and a self-improvement loop.
 - **Be reachable from your phone** — an allowlisted Telegram adapter lets you message her and receive answers, screenshots, and confirmations wherever you are.
-- **Mind good manners** — she stays silent during phone calls, rejects hallucinated speech, guards against runaway tools, strips secrets from her own logs, and pauses politely on rate limits instead of crashing.
+- **Mind good manners** — she stays silent during phone calls, rejects hallucinated speech, guards against runaway tools (including a script that loops forever), strips secrets from her own logs, and pauses politely on rate limits instead of crashing.
 
 ## How it works
 
@@ -31,6 +33,20 @@ Wake word  →  Speech-to-text (local RealtimeSTT / Groq whisper → Deepgram fa
 ```
 
 The flow is deliberately **forward-only failover**: when a provider errors or rate-limits, she silently tries the next account/model, never loses the user's request, and never speaks internal reasoning or tool JSON.
+
+### Asking her what she's actually doing
+
+She reports her live runtime instead of guessing. Try:
+
+| Ask | What you get back |
+|---|---|
+| *"Which model are you using right now?"* | The tier actually serving, cloud or local |
+| *"What are you using to listen to my voice?"* | `RealtimeSTT` / `faster-whisper` on `base.en` (int8) as the local fallback, cloud STT tried first |
+| *"What voice are you speaking with?"* | The cloud TTS model, and which one actually spoke last |
+| *"Which script did you just run?"* | The real code she executed, plus its output |
+| *"Is anything broken?"* | A one-line health summary from the doctor, or a full report on request |
+
+These are **helpers she chooses to call**, not phrase-matched triggers — she checks the live state and tells you the truth, including when something is degraded.
 
 ## Tech stack
 
@@ -215,6 +231,37 @@ Startup takes 30–60s on first boot (the voice brain loads first). FRIDAY answe
 
 ---
 
+## Verifying your install
+
+A quick check that everything landed:
+
+```powershell
+cd software
+curl http://localhost:10101/ping     # -> pong   (server is up)
+python main.py --status-ui --server-port 10102   # second instance, different port
+```
+
+### Running the test suite
+
+This repo ships FRIDAY's own test suite (**341 tests**) so you can confirm an
+update didn't break anything:
+
+```powershell
+cd software
+pytest
+```
+
+`pytest` needs no arguments. Configuration lives in `pyproject.toml`
+(`testpaths` + `norecursedirs`), which keeps the run off `.venv\` and the
+vendored interpreter sources — a bare `pytest` finishes in about a minute.
+Run one file or one topic with `pytest test_brain_router.py` or `pytest -k tts`.
+
+The tests are unit-level: they exercise routing, failover, TTS/STT chains, the
+credential redactor, self-awareness and the tool guards without needing network
+access, a microphone, or API keys.
+
+---
+
 ## Keeping it updated
 
 This project is kept up to date on GitHub. When a new version is committed
@@ -272,6 +319,18 @@ your `*.db`) are **never** touched by the updater.
 - Something else (or a second FRIDAY) is on the port. Either stop it, or start
   FRIDAY on a different one: `python main.py --status-ui --server-port 10102`.
 
+**Telegram logs `409 Conflict` over and over**
+- Two FRIDAY instances are polling with the **same** bot token. Only one process
+  can own a bot. Stop the other instance, or give the second one a different
+  `telegram_bot_token` in `%USERPROFILE%\.friday\api_credentials.json`.
+  (Both instances also share that one credentials file and the same
+  `~/.friday\` runtime folder — fine for a single install, but don't run two at once.)
+
+**`pytest` seems to hang or collects thousands of files**
+- You're running it from the wrong folder or with an old copy. Run it from
+  inside `software\` so it picks up `pyproject.toml`, and make sure you pulled
+  the latest commit (the pytest config was added upstream).
+
 **`--server livekit` exits with a message about `livekit-server`**
 - That binary isn't installed by pip. Download it from
   <https://github.com/livekit/livekit/releases> (Windows:
@@ -313,24 +372,35 @@ Friday-Jarvis\
         └── server\
         ├── server.py         → core loop: wake word, STT, brain routing, tools, TTS
         ├── brain_router.py   → weakest-first model routing + per-provider failover
-        ├── cloud_stt.py      → cloud STT with key rotation (Groq → Deepgram)
+        ├── cloud_stt.py      → cloud STT with key rotation (Groq → Deepgram → Gemini)
         ├── gemini_tts.py     → cloud-first TTS chain (Gemini → local edge-tts)
         ├── api_pools.py      → sealed quota pools (one job per API key)
+        ├── self_awareness.py → live self-report: which model/engine is really serving
+        ├── doctor.py         → one call that reports what actually works right now
+        ├── system_diagnostics.py → PC health helpers (CPU/RAM/disk/services/network)
+        ├── task_store.py     → SQLite task list
+        ├── n8n_runtime.py    → optional n8n webhook automation (off by default)
+        ├── loop_guard.py     → runaway tool-loop and timeout guards
         ├── command_router.py → deterministic, risk-gated PC-control phrases
         ├── memory.py         → SQLite long-term memory
         ├── self_improve.py   → lessons ledger injected live into each turn
         ├── reminders.py / schedule_store.py / note_taker.py / digest.py / proactive.py
         ├── remote_telegram.py → phone control (allowlisted)
+        ├── redaction.py / credential_stripper.py → secret scrubbing for logs and prompts
         ├── display_patch.py / → local vision chain for OI
         ├── screen_understanding.py / windows_control.py / ui_automation.py / web_scrape.py
         ├── focus_tracker.py / windows_context.py / desktop_ear.py / intent_judge.py
-        ├── social_guard.py / speech_filters.py / audit.py / redaction.py
+        ├── social_guard.py / speech_filters.py / audit.py
         ├── startup_settings.py / file_logger.py / persona_flair.py / status_ui.py
         ├── delegation.py / agent_coordinator.py / mcp_runtime.py / home_assistant.py (opt-in, off by default)
         ├── profiles\         → default.py (active) · fast.py · local.py · jarvis_persona.md
+        ├── tests\            → the one inherited test that is skipped (needs Poetry)
         ├── ui\               → HUD (index.html · app.js · style.css)
         ├── livekit\          → experimental LiveKit voice server
 ```
+
+FRIDAY's own tests sit next to `main.py` as `test_*.py` (see
+[Running the test suite](#running-the-test-suite)).
 
 Supporting docs: `CONTEXT.md` (design philosophy), `ROADMAP.md` (what's planned), `USES.md` (use cases).
 
@@ -347,7 +417,9 @@ FRIDAY is highly configurable through environment variables (**`FRIDAY_*`**). Im
 - `FRIDAY_TELEGRAM_BOT_TOKEN` · `FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS` · `FRIDAY_TELEGRAM_OWNER_USERNAME` — override the sealed Telegram config
 - `FRIDAY_GROQ_BRAIN_MODEL` · `FRIDAY_OPENROUTER_MODEL_CHAIN` · `FRIDAY_GEMINI_BRAIN_MODEL` · `FRIDAY_VISION_MODEL` — model routing
 - `FRIDAY_LOCAL_BRAIN_MODEL` (default `qwen3:8b`) · `FRIDAY_FAST_MODEL`
-- `FRIDAY_STT_TIMEOUT` · `FRIDAY_VISION_TIMEOUT` · `FRIDAY_TOOL_CAP` — safety/timeout tuning
+- `FRIDAY_TTS_STARTUP_WAIT` (default `12`) — seconds to wait for the local edge-tts server to come up before giving up on the local voice
+- `FRIDAY_TOOL_CAP` (advisory nudge) · `FRIDAY_HARD_TOOL_CAP` (kill the turn) · `FRIDAY_TOOL_FLOOD_CAP` (max console events) · `FRIDAY_TURN_WALL_CLOCK` (max seconds per turn) — the runaway-tool guards
+- `FRIDAY_STT_TIMEOUT` · `FRIDAY_VISION_TIMEOUT` — safety/timeout tuning
 - Feature toggles: `FRIDAY_DESKTOP_EAR`, `FRIDAY_DIGEST`, `FRIDAY_SOCIAL_GUARD`, `FRIDAY_WELCOME_BACK`, `FRIDAY_HOME_ASSISTANT`, `FRIDAY_MCP_CONFIG`, `FRIDAY_FOCUS_TRACKER`, …
 
 ---

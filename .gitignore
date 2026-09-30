@@ -8,8 +8,15 @@ __pycache__/
 # Secrets / runtime (keep the redacted template, ignore real runtime data)
 .friday/
 dot_friday/api_credentials.json
+software/source/server/api_credentials.json
 *.db
 *.log
+
+# Runtime artifacts produced by actually running FRIDAY
+software/screenshots/
+software/tmp-oi/**/build/
+*.mp3
+*.wav
 
 # OS/editor
 .DS_Store
