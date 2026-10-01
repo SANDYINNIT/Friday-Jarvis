@@ -31,6 +31,36 @@ GEMINI_BASE = os.environ.get(
 LOCAL_BASE = os.environ.get("OLLAMA_CHAT_URL", "http://localhost:11434")
 LOCAL_MODEL = os.environ.get("FRIDAY_LOCAL_BRAIN_MODEL", "ollama_chat/qwen3:8b")
 
+# Modal serverless GPU endpoint - PRIMARY brain (Sir directive 2026-09-30).
+# It is a self-hosted GLM-5.3 Flash (NVFP4) server exposing an OpenAI-compatible
+# /v1, so it behaves exactly like the other cloud candidates and needs no custom
+# auth: the pool key is already the combined "wk-<id>.ws-<secret>" bearer token.
+def _modal_api_base():
+    """Modal's OpenAI-compatible base, normalised to end in /v1.
+
+    Litellm appends /chat/completions itself, so the base MUST include /v1.
+    Live-verified 2026-09-30: without it the endpoint answers
+    404 {"error": "route not found"} and every Modal turn fails over.
+    """
+    raw = (
+        os.environ.get("FRIDAY_MODAL_BASE", "").strip()
+        or api_pools.extra_credential("modal_endpoint")
+    ).rstrip("/")
+    if not raw:
+        return None
+    if not raw.endswith("/v1"):
+        raw = raw + "/v1"
+    return raw
+
+
+MODAL_BASE = _modal_api_base()
+# Model id read from the live endpoint's /v1/models (2026-09-30):
+#   nvidia/GLM-5.3-Flash-NVFP4
+# Do not guess this - Modal serves the API under the exact served-model-name.
+MODAL_MODEL = os.environ.get(
+    "FRIDAY_MODAL_MODEL", "nvidia/GLM-5.3-Flash-NVFP4"
+)
+
 GROQ_FAST_MODEL = os.environ.get("FRIDAY_GROQ_FAST_MODEL", "openai/gpt-oss-20b")
 GROQ_STRONG_MODEL = os.environ.get("FRIDAY_GROQ_STRONG_MODEL", "openai/gpt-oss-120b")
 # OpenRouter free-model inventory CHANGES and stale slugs return 404
@@ -203,36 +233,44 @@ def classify(user_text):
 def resolve(user_text):
     """Ordered candidates (pool_name, model, api_base) for a message.
 
-    Cloud-first for every tier (see module docstring): chat and task/tool work
-    both start on the fast cloud chain with local qwen3:8b as the complete
-    fallback (safe: apply_for() storm guard locks any post-tool failover onto
-    LOCAL, so mid-turn hops cannot re-run tools cross-provider). Explicit
-    strongest-model requests start on the Gemini chain.
+    ORDER (Sir directive 2026-09-30), identical for every tier:
+
+        1. Modal  - self-hosted GLM-5.3 Flash (NVFP4), the PRIMARY brain
+        2. Groq   - gpt-oss-20b then gpt-oss-120b
+        3. OpenRouter - free tool-calling models
+        4. Gemini - flash chain
+        5. Local  - qwen3:8b, the complete final fallback
+
+    Modal leads because it is a serverless endpoint Sir owns: it has no public
+    free-tier quota to exhaust and no competitor sharing it, so it does not
+    429 the way Groq/Gemini do. `apply_for()` also skips any candidate whose
+    pool has no key, so a user who configures only ONE provider simply gets a
+    one-entry chain - they never have to fill in every pool.
     """
     tier = classify(user_text)
-    gemini_candidates = [
-        ("brain_gemini", model, GEMINI_BASE) for model in GEMINI_MODEL_CHAIN
+    modal_candidates = []
+    if MODAL_BASE:
+        modal_candidates = [("brain_modal", MODAL_MODEL, MODAL_BASE)]
+    groq_candidates = [
+        ("brain_groq", GROQ_FAST_MODEL, GROQ_BASE),
+        ("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE),
     ]
     openrouter_candidates = [
         ("brain_openrouter", model, OPENROUTER_BASE) for model in OPENROUTER_MODEL_CHAIN
     ]
+    gemini_candidates = [
+        ("brain_gemini", model, GEMINI_BASE) for model in GEMINI_MODEL_CHAIN
+    ]
     chosen = []
-    if tier == "deep":
-        # Explicit strongest-model request: Gemini chain first, then Groq
-        # strong, local as the dependable fallback.
-        chosen = [
-            *gemini_candidates,
-            ("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE),
-        ]
-    # else normal / hard / task-tool: nothing pre-chosen -> cloud chain fills
-    # in below (groq fast first) and "local" is appended as the complete
-    # fallback, for ALL turns. Tool work is no longer local-first: the
-    # storm guard in apply_for() keeps cross-provider tool re-runs bounded.
+    # Modal is PRIMARY for every tier, including "use your strongest" (Sir
+    # directive): GLM-5.3 Flash on a self-hosted endpoint is both the fastest
+    # and the most dependable option available, so the deep tier must not jump
+    # ahead of it. Gemini remains in the chain, just later.
     for candidate in [
-        ("brain_groq", GROQ_FAST_MODEL, GROQ_BASE),
-        ("brain_groq", GROQ_STRONG_MODEL, GROQ_BASE),
-        *gemini_candidates,
+        *modal_candidates,
+        *groq_candidates,
         *openrouter_candidates,
+        *gemini_candidates,
     ]:
         if candidate not in chosen:
             chosen.append(candidate)

@@ -13,7 +13,7 @@
 - **Work your computer** — open/close apps, focus windows, type, click, read your screen (screenshot → OCR/vision), control media, manage Wi-Fi tasks, run PowerShell/Python.
 - **Show her work** — every script she writes and runs is displayed live in the Chat stream (`TOOL #n — script (python, N chars)`), and she can repeat or explain the last one on request. No more "it ran some code" black boxes.
 - **Know what she knows** — ask her which model is answering, which speech-to-text engine is listening, or which TTS voice spoke, and she checks her **live** runtime instead of guessing. She also has a `doctor` that reports exactly which brain tiers, STT engines and TTS providers work right now.
-- **Use models smartly** — a default local brain (`qwen3:8b` via Ollama) with automatic failover to cloud providers (Groq, OpenRouter, Gemini, Deepgram) when the local model can't handle it or gets rate-limited. Cloud quota pools keep each API key locked to one job.
+- **Use models smartly** - an automatic failover chain picks the best available model for each turn and falls over silently when one throttles or fails. **You only configure the providers you actually want** - see [Configuring AI providers](#configuring-ai-providers). One provider is enough, and zero still works fully local.
 - **Remember things** — SQLite memory, a lessons file injected live into her system prompt every turn, note-taking, calendar scheduling, a task list, and a self-improvement loop.
 - **Be reachable from your phone** — an allowlisted Telegram adapter lets you message her and receive answers, screenshots, and confirmations wherever you are.
 - **Mind good manners** — she stays silent during phone calls, rejects hallucinated speech, guards against runaway tools (including a script that loops forever), strips secrets from her own logs, and pauses politely on rate limits instead of crashing.
@@ -167,6 +167,45 @@ Startup takes 30–60 s the first time (the brain loads). When she's ready she
 answers `http://localhost:10101/ping` with `pong`. **If that shows `pong`, your
 install is good.**
 
+### Configuring AI providers
+
+FRIDAY walks an ordered failover chain and uses the first provider that is both
+**configured** and **healthy**:
+
+```
+Modal (self-hosted, optional)  ->  Groq  ->  OpenRouter  ->  Gemini  ->  Local qwen3:8b
+```
+
+**You do NOT need to add all of them - add only what you want.**
+
+| You configure | What actually gets used |
+|---|---|
+| nothing | Local `qwen3:8b` only. Fully working, fully offline. |
+| only one Gemini key | `Gemini -> Local`. Nothing else is contacted. |
+| only Groq | `Groq -> Local`. |
+| Groq + one OpenRouter key | `Groq -> OpenRouter -> Local`. |
+| a Modal endpoint + key | Modal is tried first, then the rest you configured. |
+
+Any provider with **no key is skipped automatically**, so a partially filled
+credentials file is completely fine. Keys that run dry are put on a cooldown
+(6 hours by default) and the next provider takes over while they recover.
+
+**Modal (optional, advanced)** - if you run your own model on
+[Modal](https://modal.com), FRIDAY can use it as the primary brain and vision.
+Modal endpoints speak the OpenAI API, so add the proxy token as a normal key and
+put the endpoint next to it in your credentials file:
+
+```json
+{
+  "modal_brain":  ["<endpoint-url>", "<token-id>.<token-secret>"],
+  "modal_endpoint": "https://<your-workspace>--<your-endpoint>.modal.direct"
+}
+```
+
+> The endpoint URL **must** include `/v1`. If it does not, every Modal call
+> fails with `404 route not found` and FRIDAY quietly falls back.
+> Ask Modal for your token id/secret from the endpoint's "Proxy Auth" tab; the
+> secret is only shown once.
 ### API credentials
 
 FRIDAY reads her API keys from `%USERPROFILE%\.friday\api_credentials.json`. A ready-to-fill template lives at `dot_friday\api_credentials.example.json` — copy it there and replace every `"(API needed here)"`:

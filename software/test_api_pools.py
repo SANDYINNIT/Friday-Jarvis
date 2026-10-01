@@ -248,17 +248,24 @@ def test_brain_classifier_tiers():
 
 
 def test_brain_resolve_keeps_ordered_fallback_chain():
+    """Order is Modal -> Groq -> OpenRouter -> Gemini -> local (Sir 2026-09-30)."""
     resolved = brain_router.resolve("hello there")
     pools = [item[0] for item in resolved]
-    assert pools[0] == "brain_groq"
-    # Gemini (1M TPM) now sits before OpenRouter in the escape chain.
-    assert pools.index("brain_gemini") < pools.index("brain_openrouter")
+    if brain_router.MODAL_BASE:
+        # Modal is the PRIMARY brain whenever an endpoint is configured.
+        assert pools[0] == "brain_modal"
+        assert pools.index("brain_groq") > pools.index("brain_modal")
+    else:
+        assert pools[0] == "brain_groq"
+    assert pools.index("brain_openrouter") < pools.index("brain_gemini")
     assert pools[-1] == "local"
 
 
-def test_brain_resolve_deep_prefers_gemini():
+def test_brain_resolve_deep_keeps_modal_primary_and_gemini_order():
+    """"Use your strongest" must NOT jump ahead of the Modal primary."""
     resolved = brain_router.resolve("use your strongest model please")
-    assert resolved[0][0] == "brain_gemini"
+    if brain_router.MODAL_BASE:
+        assert resolved[0][0] == "brain_modal"
     # Per-account-per-model chain: strongest new models first
     gemini_models = [item[1] for item in resolved if item[0] == "brain_gemini"]
     assert gemini_models == [
@@ -372,8 +379,8 @@ def test_brain_failover_skips_banned_pool(monkeypatch):
     interpreter = type("I", (), {"llm": llm})
     router = brain_router.BrainRouter(enabled=True)
     ticket = router.apply_for("hello", interpreter)
-    assert ticket == ("brain_gemini", "m1", "gemini-3.8-flash")
-    assert llm.api_key == "m1"
+    # Chain order is Modal -> Groq -> OpenRouter -> Gemini -> local, so with
+    assert ticket == ("brain_openrouter", "o1", "nvidia/nemotron-3.5-lightning:free")
 
 
 def test_brain_apply_for_uses_local_when_everything_banned(monkeypatch):
@@ -449,9 +456,9 @@ def test_brain_failover_to_next_bans_key_and_advances(monkeypatch):
     assert router.apply_for("hello", interpreter) == ("brain_groq", "g1", "openai/gpt-oss-20b")
     ok = router.failover_to_next(interpreter, "hello", reason="tool choice is none")
     assert ok is True
-    assert router.current == ("brain_gemini", "m1", "gemini-3.8-flash")
+    assert router.current == ("brain_openrouter", "o1", "nvidia/nemotron-3.5-lightning:free")
     assert pools["brain_groq"].banned() == 1
-    assert llm.api_key == "m1"
+    assert llm.api_key == "o1"
 
 
 def test_brain_failover_to_next_permanent_after_full_exhaustion(monkeypatch):
@@ -545,7 +552,7 @@ def test_brain_turn_blacklist_forward_only(monkeypatch):
     # (chain order is groq fast -> groq strong -> gemini -> openrouter -> local).
     router._turn_mark("brain_groq", "openai/gpt-oss-120b")
     router.apply_for("hello", interpreter)
-    assert router.current[0] == "brain_gemini"
+    assert router.current[0] == "brain_openrouter"
     # next turn clears the blacklist so groq is eligible again
     router.new_turn()
     ticket = router.apply_for("hello", interpreter)

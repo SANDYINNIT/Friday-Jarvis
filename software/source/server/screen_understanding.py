@@ -300,8 +300,91 @@ def _call_vision(key, pool_name, jpeg_bytes, prompt, model=None):
     return False, None, f"unknown vision pool {pool_name}", False
 
 
+def _modal_vision(jpeg_bytes, prompt, timeout=None):
+    """Modal (self-hosted GLM-5.3 Flash NVFP4) vision - PRIMARY (Sir 2026-09-30).
+
+    Same OpenAI-compatible /v1 surface as the brain, so it reuses the pool key
+    verbatim and needs no custom auth. Being self-hosted, it has no public
+    free-tier quota, so it should answer when Groq/Gemini are throttled.
+    """
+    pool = api_pools.pool("vision_modal")
+    if pool is None or pool.empty:
+        return False, None, False, "no modal key"
+    key = pool.next_key()
+    if not key:
+        return False, None, False, "no modal key"
+    base = ""
+    model = ""
+    try:
+        # Single source of truth for the Modal endpoint/model, shared with the
+        # brain router (which normalises the base to end in /v1 - without it the
+        # endpoint 404s with "route not found").
+        from .brain_router import MODAL_BASE, MODAL_MODEL
+
+        base = (MODAL_BASE or "").rstrip("/")
+        model = MODAL_MODEL
+    except Exception:
+        base = (os.environ.get("FRIDAY_MODAL_BASE", "") or "").rstrip("/")
+        model = os.environ.get("FRIDAY_MODAL_MODEL", "")
+    if not base:
+        return False, None, False, "modal base not configured"
+    if not base.endswith("/v1"):
+        base = base + "/v1"
+    model = os.environ.get("FRIDAY_MODAL_VISION_MODEL", "") or model
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url",
+                     "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes).decode()}},
+                ],
+            }
+        ],
+        "max_tokens": 400,
+        "temperature": 0.1,
+    }
+    try:
+        response = requests.post(
+            f"{base}/v1/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            timeout=timeout or VISION_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        return False, None, False, str(exc)
+    if response.status_code >= 400:
+        quota_failure = response.status_code in (401, 403, 429)
+        return False, None, quota_failure, f"HTTP {response.status_code}"
+    try:
+        content = (response.json()["choices"][0]["message"].get("content") or "").strip()
+    except Exception as exc:
+        return False, None, False, f"bad payload: {exc}"
+    if not content:
+        return False, None, False, "empty content"
+    pool.succeed(key)
+    api_pools.model_succeed("vision_modal", model)
+    return True, content, False, ""
+
+
 def _cloud_vision(jpeg_bytes, prompt):
     last_error = ""
+    # Modal first (Sir directive): the self-hosted endpoint is the primary
+    # cloud vision and has no public quota to exhaust.
+    ok, payload, quota_failure, error = _modal_vision(jpeg_bytes, prompt)
+    if ok:
+        return True, payload, "vision_modal", ""
+    if quota_failure and payload is None and error:
+        try:
+            from .file_logger import friday_logger
+
+            friday_logger().warning("modal vision unavailable: %s", error)
+        except Exception:
+            pass
+    if error:
+        last_error = api_pools.sanitize(str(error))
     # Gemini stage: ONE short trial on the strongest available model. Trying
     # the full 5-model chain at the 25s timeout each was stalling screen turns
     # ~60-125s whenever the free-tier Gemini endpoint just hung — then the

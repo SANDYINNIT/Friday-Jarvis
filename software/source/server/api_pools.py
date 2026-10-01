@@ -35,6 +35,20 @@ CREDENTIALS_DEFAULT_PATH = os.path.join(
 POOL_SCHEMA = {
     "stt_groq": {"file": "groq_stt", "envs": ("GROQ_STT_API_KEY", "GROQ_API_KEY")},
     "stt_deepgram": {"file": "deepgram", "envs": ("DEEPGRAM_API_KEY",)},
+    # Modal serverless GPU endpoint (OpenAI-compatible). PRIMARY for both brain
+    # and vision: it is a self-hosted GLM-5.3 Flash (NVFP4) endpoint, so it is
+    # not a metered public API and does not share a free-tier quota with anyone.
+    # The stored key is the COMBINED proxy token "wk-<id>.ws-<secret>", which is
+    # exactly what an OpenAI-compatible client wants as its api_key. Pool auth is
+    # therefore just a bearer token and needs no per-provider header handling.
+    "brain_modal": {
+        "file": "modal_brain",
+        "envs": ("MODAL_BRAIN_API_KEY", "MODAL_API_KEY", "MODAL_PROXY_TOKEN"),
+    },
+    "vision_modal": {
+        "file": "modal_vision",
+        "envs": ("MODAL_VISION_API_KEY", "MODAL_API_KEY", "MODAL_PROXY_TOKEN"),
+    },
     "brain_groq": {"file": "groq_brain", "envs": ("GROQ_BRAIN_API_KEY", "GROQ_API_KEY")},
     "brain_openrouter": {
         "file": "openrouter_brain",
@@ -67,6 +81,8 @@ POOL_SCHEMA = {
 POOL_MIN_INTERVALS = {
     "stt_groq": 1.0,          # 20 RPM whisper limit
     "stt_deepgram": 0.2,      # High concurrency cap
+    "brain_modal": 0.0,       # self-hosted endpoint: no public rate limit
+    "vision_modal": 0.0,      # self-hosted endpoint: no public rate limit
     "brain_groq": 1.5,        # 30 RPM text limit
     "brain_openrouter": 2.5,  # 20 RPM free-model cap
     "brain_gemini": 3.5,      # 15 RPM free tier limit
@@ -244,6 +260,13 @@ _GENERIC_SECRETS = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
     re.compile(r"[0-9a-f]{40}"),
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    # Modal proxy tokens. The combined form "wk-<id>.ws-<secret>" is what an
+    # OpenAI-compatible client carries, and a ticket tuple contains it verbatim
+    # - so redact the combined form AND either half on its own. Without these,
+    # any accidental `print(ticket)` puts the endpoint credential in the log.
+    re.compile(r"wk-[A-Za-z0-9_-]{8,}\.ws-[A-Za-z0-9_-]{8,}"),
+    re.compile(r"\bwk-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"\bws-[A-Za-z0-9_-]{12,}"),
 )
 
 
@@ -264,6 +287,40 @@ def cloud_brain_enabled():
 
 def cloud_vision_enabled():
     return _env_flag("FRIDAY_CLOUD_VISION")
+
+
+def extra_credential(name, default=""):
+    """Read a SCALAR (non-list) value from the credentials JSON.
+
+    Used for things that are configuration rather than a key - e.g. the Modal
+    endpoint URL. Keeping the endpoint next to the key means a user configures
+    one provider in one place, and no developer's personal endpoint has to be
+    hard-coded in shipped code. Env vars win, so a launcher can override it.
+    """
+    for var in (f"FRIDAY_{name.upper()}", name.upper()):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return value
+    for candidate in (
+        os.environ.get("FRIDAY_CREDENTIALS_FILE", ""),
+        CREDENTIALS_DEFAULT_PATH,
+    ):
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            value = data.get(name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, list) and value:
+                first = value[0]
+                if isinstance(first, str) and first.strip():
+                    return first.strip()
+    return default
 
 
 class CredentialStore:
