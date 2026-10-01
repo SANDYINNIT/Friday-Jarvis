@@ -238,15 +238,58 @@ def test_groq_transcribe_maps_quota_status(monkeypatch):
     assert ok and payload == "hi" and quota is False
 
 
-def test_brain_classifier_tiers():
-    assert brain_router.classify("what time is it") == "normal"
-    assert brain_router.classify("debug this weird crash in production") == "hard"
-    assert brain_router.classify("research the best approach for this") == "hard"
-    assert brain_router.classify("this is a difficult calculus problem") == "hard"
-    assert brain_router.classify("use your strongest model for this") == "deep"
-    assert brain_router.classify("use gemini, this is really important") == "deep"
+def test_tier_classifier_is_gone():
+    """The deep/hard/normal tiers were removed on 2026-09-30 (Sir).
+
+    With Modal as the primary brain for every turn, a tier could not change the
+    outcome, so classify() was dead code and "use your strongest model" silently
+    did nothing. A phrase that claims to escalate but does not is worse than no
+    phrase: it teaches the user a lie about the system.
+    """
+    assert not hasattr(brain_router, "classify")
+    assert not hasattr(brain_router, "DEEP_TRIGGERS")
+    assert not hasattr(brain_router, "HARD_TRIGGERS")
+    assert not hasattr(brain_router, "TOOL_TASK_TRIGGERS")
 
 
+def test_one_chain_for_every_kind_of_request():
+    """Chat, tool work, "debug this", and the old "strongest" phrase must all
+    produce the IDENTICAL order - no tier is left to branch on."""
+    baseline = [item[0] for item in brain_router.resolve("hello there")]
+    for phrase in (
+        "use your strongest model for this",
+        "use gemini, this is really important",
+        "debug this weird crash in production",
+        "research the best approach for this",
+        "take a screenshot",
+    ):
+        assert [item[0] for item in brain_router.resolve(phrase)] == baseline, phrase
+def test_tier_classifier_is_gone():
+    """The deep/hard/normal tiers were removed on 2026-09-30 (Sir).
+
+    With Modal as the primary brain for every turn, a tier could not change the
+    outcome, so classify() was dead code and "use your strongest model" silently
+    did nothing. A phrase that claims to escalate but does not is worse than no
+    phrase: it teaches the user a lie about the system.
+    """
+    assert not hasattr(brain_router, "classify")
+    assert not hasattr(brain_router, "DEEP_TRIGGERS")
+    assert not hasattr(brain_router, "HARD_TRIGGERS")
+    assert not hasattr(brain_router, "TOOL_TASK_TRIGGERS")
+
+
+def test_one_chain_for_every_kind_of_request():
+    """Chat, tool work, "debug this", and the old "strongest" phrase must all
+    produce the IDENTICAL order - no tier is left to branch on."""
+    baseline = [item[0] for item in brain_router.resolve("hello there")]
+    for phrase in (
+        "use your strongest model for this",
+        "use gemini, this is really important",
+        "debug this weird crash in production",
+        "research the best approach for this",
+        "take a screenshot",
+    ):
+        assert [item[0] for item in brain_router.resolve(phrase)] == baseline, phrase
 def test_brain_resolve_keeps_ordered_fallback_chain():
     """Order is Modal -> Groq -> OpenRouter -> Gemini -> local (Sir 2026-09-30)."""
     resolved = brain_router.resolve("hello there")

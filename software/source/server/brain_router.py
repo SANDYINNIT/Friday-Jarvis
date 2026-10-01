@@ -1,17 +1,19 @@
-﻿"""Per-turn Brain routing: tier classification + model/pool selection.
+"""Per-turn Brain routing: model/pool selection for a single failover chain.
 
-Cloud-first routing for every tier (2026-09-28, Sir's decision after the
-hybrid's local-for-tools leg backfired: slow local qwen3 prefill + the
-wrong-app GUI-truthfulness bug):
-  - normal/casual chat AND hard/task-tool work share one cloud-first chain:
-    groq fast (gpt-oss-20b) -> groq strong -> gemini chain -> openrouter
-    chain -> local qwen3:8b as the COMPLETE fallback.
-  - deep  (explicit "use gemini"/strongest): gemini chain first ->
-    groq strong -> openrouter -> local.
+ONE chain, used for every turn (Sir directive 2026-09-30):
+
+    Modal -> Groq -> OpenRouter -> Gemini -> Local qwen3:8b
+
+The earlier "deep"/"hard"/"normal" tier system and its "use your strongest
+model" trigger were REMOVED on purpose. Modal became the primary brain for
+every turn, so a tier could no longer change anything: `classify()` was dead
+code producing a variable nobody read, and "use your strongest model" quietly
+meant nothing. A phrase that sounds like it should escalate but does not is
+worse than no phrase at all - it teaches the user a lie about the system.
+
 Mid-turn storm guard: once a tool row exists in interpreter.messages this
-turn, failover only ever lands back on local (no cross-cloud hop that
-forgets what already ran) - this is what keeps cloud-held tool turns safe.
-A spoken override ("use your strongest model") forces the deep tier.
+turn, failover only ever lands back on local (no cross-cloud hop that forgets
+what already ran) - this is what keeps cloud-held tool turns safe.
 """
 
 import os
@@ -97,64 +99,12 @@ GEMINI_MODEL_CHAIN = [
 if GEMINI_BRAIN_MODEL not in GEMINI_MODEL_CHAIN:
     GEMINI_MODEL_CHAIN.append(GEMINI_BRAIN_MODEL)
 
-DEEP_TRIGGERS = [
-    "use your strongest",
-    "use the strongest",
-    "strongest model",
-    "use gemini",
-    "high-stakes",
-    "high stakes",
-    "most important",
-    "once in a lifetime",
-]
-HARD_TRIGGERS = [
-    r"\bresearch\b",
-    r"\bresearcher\b",
-    r"\bscientific\b",
-    r"\bpaper\b",
-    r"\banaly[sz]",
-    r"\bdebug",
-    r"\brefactor",
-    r"\bsecurity\b",
-    r"\bvulnerab",
-    r"\barchitecture\b",
-    r"\bdesign a\b",
-    r"\bplan this\b",
-    r"\breview this code\b",
-    r"\bexplain why\b",
-    r"\broot cause\b",
-    r"\bproduction\b",
-    r"\bdeploy\b",
-    r"\bmigration\b",
-    r"\boptimize\b",
-    r"\bperformance\b",
-    r"\bdifficult\b",
-    r"\bcomplex\b",
-    r"\bcomplicated\b",
-    r"\bdeep reasoning\b",
-    r"\bstep[- ]by[- ]step plan\b",
-    r"\blarge[\s-]context\b",
-    r"\blong document\b",
-    r"https?://",
-    r"github\.com/",
-]
 
-# Imperative action/tool requests route LOCAL-first (deterministic offline
-# tool path; free-tier cloud 429 mid-turn hops historically re-ran tools to
-# the loop cap). Conservative on purpose: clear app/system/command verbs and
-# explicit "do this now" phrasing only, so casual chat stays cloud-first.
-TOOL_TASK_TRIGGERS = [
-    r"^(?:please\s+|can\s+you\s+|could\s+you\s+|go\s+ahead\s+and\s+)?(?:open|close|launch|start|stop|kill|terminate|shutdown|restart|click|install|uninstall|set up|play|pause|download|delete|move|copy|rename|create|save|take a screenshot|scan|type|press|mute|unmute)\b",
-    r"\binstall\b",
-    r"\buninstall\b",
-    r"\b(?:open|launch|start|close|stop|kill|terminate)\s+(?:the\s+)?[a-z0-9_.-]+\s+(?:app|application|program|window|file|folder|tab|site|website|url|browser)\b",
-    r"\bclick\s+(?:on\s+)?(?:the\s+)?[a-z0-9_-]+\s+(?:button|icon|link|tab|menu)\b",
-    r"\btake\s+a\s+screenshot\b",
-    r"\bset\s+(?:the\s+)?volume",
-    r"\bwrite\s+(?:a|an|the|this)\s+(?:python|script|program|file|function|class)\b",
-]
-
-_REDUCED = re.compile(r"(redacted)", re.IGNORECASE)
+# NOTE (2026-09-30, Sir directive): the "deep"/"hard"/"normal" TIER system and its
+# "use your strongest model" trigger were REMOVED. Modal is the primary brain for
+# every turn, so a tier could no longer change anything - the classifier was dead
+# code that only ever produced a variable nobody read, and "use your strongest"
+# quietly meant nothing. One chain, one order, no fake tiers.
 
 _KEY_ERROR_MARKERS = (
     "rate limit", "429", "401", "unauthorized", "402", "payment required",
@@ -217,23 +167,10 @@ def _retry_after_seconds(reason_text, default_cooldown=None):
     return min(120.0, hint + 3.0)
 
 
-def classify(user_text):
-    """Return 'deep', 'hard' or 'normal' for the given user message."""
-    text = _REDUCED.sub("", user_text or "")
-    lowered = text.lower()
-    if any(trigger.lower() in lowered for trigger in DEEP_TRIGGERS):
-        return "deep"
-    if any(re.search(pattern, lowered) for pattern in HARD_TRIGGERS):
-        return "hard"
-    if any(re.search(pattern, lowered) for pattern in TOOL_TASK_TRIGGERS):
-        return "hard"
-    return "normal"
-
-
 def resolve(user_text):
     """Ordered candidates (pool_name, model, api_base) for a message.
 
-    ORDER (Sir directive 2026-09-30), identical for every tier:
+    ORDER (Sir directive 2026-09-30) - ONE chain, no tiers:
 
         1. Modal  - self-hosted GLM-5.3 Flash (NVFP4), the PRIMARY brain
         2. Groq   - gpt-oss-20b then gpt-oss-120b
@@ -247,7 +184,6 @@ def resolve(user_text):
     pool has no key, so a user who configures only ONE provider simply gets a
     one-entry chain - they never have to fill in every pool.
     """
-    tier = classify(user_text)
     modal_candidates = []
     if MODAL_BASE:
         modal_candidates = [("brain_modal", MODAL_MODEL, MODAL_BASE)]
@@ -262,9 +198,11 @@ def resolve(user_text):
         ("brain_gemini", model, GEMINI_BASE) for model in GEMINI_MODEL_CHAIN
     ]
     chosen = []
-    # Modal is PRIMARY for every tier, including "use your strongest" (Sir
-    # directive): GLM-5.3 Flash on a self-hosted endpoint is both the fastest
-    # and the most dependable option available, so the deep tier must not jump
+    # Modal is PRIMARY for every turn (Sir directive 2026-09-30). The former
+    # "deep tier" exception that let Gemini jump ahead is gone: with one chain
+    # there is nothing to exception.
+    # directive): GLM-5.3 Flash on a self-hosted endpoint is the fastest
+    # and most dependable option available.
     # ahead of it. Gemini remains in the chain, just later.
     for candidate in [
         *modal_candidates,
@@ -284,7 +222,7 @@ _LIVE_ROUTER = {"router": None}
 
 
 def live_serving_state() -> dict:
-    """What model/pool/tier is serving turns RIGHT NOW (and what ran last).
+    """What model/pool is serving turns RIGHT NOW (and what ran last).
 
     Read-only and defensive: never raises, so self-reporting can never break a
     turn. Returns counts/names only - never keys.
@@ -292,8 +230,8 @@ def live_serving_state() -> dict:
     router = _LIVE_ROUTER.get("router")
     if router is None:
         return {"ready": False, "current_model": None, "current_pool": None,
-                "current_tier": None, "last_model": None, "last_pool": None,
-                "last_tier": None, "local_default": LOCAL_MODEL}
+                "last_model": None, "last_pool": None,
+        "local_default": LOCAL_MODEL}
 
     def _get(name, default=None):
         try:
@@ -306,10 +244,8 @@ def live_serving_state() -> dict:
         "ready": True,
         "current_model": _get("current_model"),
         "current_pool": _get("current_pool"),
-        "current_tier": _get("current_tier"),
         "last_model": _get("last_model"),
         "last_pool": _get("last_pool"),
-        "last_tier": _get("last_tier"),
         "local_default": LOCAL_MODEL,
     }
 
@@ -319,14 +255,12 @@ class BrainRouter:
     def __init__(self, enabled=True):
         self._enabled = enabled
         self._current = None
-        self._current_tier = None
         self._current_model = None
         self._current_pool = None
         # Persisted last-serving state so the UI can show WHAT last ran even
         # after the turn completes (current clears on mark_success).
         self._last_model = None
         self._last_pool = None
-        self._last_tier = None
         # Publish to a module-level slot so self_awareness can report the model
         # that is REALLY serving turns, without importing server.py (which
         # would be circular). Sir asked for model self-awareness: she must be
@@ -358,11 +292,6 @@ class BrainRouter:
             return self._current
 
     @property
-    def current_tier(self):
-        with self._lock:
-            return self._current_tier
-
-    @property
     def current_model(self):
         with self._lock:
             return self._current_model
@@ -374,7 +303,6 @@ class BrainRouter:
 
     def apply_for(self, user_text, interpreter):
         ticket = None
-        tier = classify(user_text)
         model_name = None
         pool_name_selected = None
         if self._enabled:
@@ -442,13 +370,11 @@ class BrainRouter:
             pool_name_selected = "local"
         with self._lock:
             self._current = ticket
-            self._current_tier = tier
             self._current_model = model_name
             self._current_pool = pool_name_selected
             if ticket is not None:
                 self._last_model = model_name
                 self._last_pool = pool_name_selected
-                self._last_tier = tier
         return ticket
 
     @property
@@ -460,11 +386,6 @@ class BrainRouter:
     def last_pool(self):
         with self._lock:
             return self._last_pool
-
-    @property
-    def last_tier(self):
-        with self._lock:
-            return self._last_tier
 
     @property
     def last_switch(self):
@@ -534,7 +455,6 @@ class BrainRouter:
             self._current = None
             self._current_pool = None
             self._current_model = None
-            self._current_tier = None
         if pool_name == "local":
             return  # no quota pool/cooldown bookkeeping for the local brain
         quota_pool = api_pools.pool(pool_name)
@@ -551,7 +471,6 @@ class BrainRouter:
             self._current = None
             self._current_pool = None
             self._current_model = None
-            self._current_tier = None
 
         reason_text = str(reason or "")
         lowered_reason = reason_text.lower()
