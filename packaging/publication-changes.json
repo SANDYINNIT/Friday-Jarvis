@@ -198,7 +198,8 @@
     "packaging/publication-changes.json",
     "packaging/publication-scan.json",
     "packaging/publication-verification.json",
-    "packaging/release_scan.py"
+    "packaging/release_scan.py",
+    "packaging/github-publication.json"
   ],
   "relocated_old_history_private": true
 }

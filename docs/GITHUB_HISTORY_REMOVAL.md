@@ -8,6 +8,12 @@ The old history contains runtime documents at software/jarvis_training.md, softw
 
 The approved change replaces main with the clean root and preserves no old parents. It changes nine historical commits and the tracked release tree. It removes no other branch or tag. A force-with-lease must name the exact reviewed remote tip, and must refuse if it changed. Fetching or merging old objects into the clean repository is unnecessary and would risk reintroducing them.
 
+## Verified ref replacement
+
+The force-with-lease replacement succeeded. The source root is df032ff258a4efe7891bd006184c3e248861b333, with no parents. GitHub's recursive tree matched all 628 local source files. A follow-up documentation commit records that evidence. There are no remaining old branches or tags in the advertised refs.
+
+The old tip still returns HTTP 200 from the GitHub commit API. Server-side removal remains open and must not be described as complete. The published ref and the old retained objects are separate observations.
+
 ## Owner follow-up after replacement
 
 1. If any historically embedded credential was real, revoke or rotate it at its issuer. A history rewrite does not revoke a secret.

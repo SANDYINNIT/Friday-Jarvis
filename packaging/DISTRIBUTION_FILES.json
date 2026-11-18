@@ -1,5 +1,5 @@
 {
-  "policy": "Exact release files. Self inventory is excluded. publication-scan.json is a precommit scan; a separate postcommit scan is preserved privately.",
+  "policy": "Exact release files. Self inventory is excluded. publication-scan.json is a precommit snapshot; final object scans are preserved privately.",
   "files": [
     {
       "file": ".gitattributes",
@@ -33,8 +33,8 @@
     },
     {
       "file": "docs/GITHUB_HISTORY_REMOVAL.md",
-      "bytes": 2795,
-      "sha256": "41df451bef40a770f8c0dbe17c0ed7d1d91ad6aced2ac65e553e7cd54fad42d7"
+      "bytes": 3341,
+      "sha256": "5e87e732ec44a237e8b308c3dfa05cccf687467e75e4c55b6a86d3085737b608"
     },
     {
       "file": "docs/LOCAL_SETUP_ACCEPTANCE.md",
@@ -92,14 +92,19 @@
       "sha256": "abdf2753f7420665d8cf4b09e46b41625a90be135d12a7378efa0e2cc1cf76ba"
     },
     {
+      "file": "packaging/github-publication.json",
+      "bytes": 553,
+      "sha256": "f56ced97907e6056abbe79d278fa75e374b2520b10a470aab0d5d89ea1dc7a19"
+    },
+    {
       "file": "packaging/linux_env.py",
       "bytes": 741,
       "sha256": "7b29054763ceaf962323fefd264ef3abb3301c6084dbcda983d033bfb7db9679"
     },
     {
       "file": "packaging/publication-changes.json",
-      "bytes": 8333,
-      "sha256": "43bd19e3b21f03461dc2bb9b083d629c54d874b235f08180b4d3c65b846099bd"
+      "bytes": 8374,
+      "sha256": "810d832bd67bbb5d6c6287c122dd4b2d594b3136f34187ee980ad645e598611d"
     },
     {
       "file": "packaging/publication-scan.json",
@@ -138,8 +143,8 @@
     },
     {
       "file": "PUBLICATION_REVIEW.md",
-      "bytes": 1911,
-      "sha256": "71ef055e03796cbc89f409cab9c5717dfecd42e9c1f1cc15c1f0d1686e501573"
+      "bytes": 2369,
+      "sha256": "34ea256fe09c0060e8c75bc9834818348159b2ec8659601cd218b9ffca4ee437"
     },
     {
       "file": "README.md",

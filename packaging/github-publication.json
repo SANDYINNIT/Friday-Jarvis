@@ -1,0 +1,18 @@
+{
+  "repository": "SANDYINNIT/Friday-Jarvis",
+  "default_branch": "main",
+  "published_source_root": "df032ff258a4efe7891bd006184c3e248861b333",
+  "published_tree": "2de0b9c3b3287c8f7f81c25007698f837a00a79b",
+  "files_verified_by_git_blob_sha": 628,
+  "reachable_commits": 1,
+  "branches": [
+    "main"
+  ],
+  "tags": 0,
+  "forks": 0,
+  "pull_requests": 0,
+  "old_commit_api_http": 200,
+  "old_history_reachable_from_main": false,
+  "github_sensitive_data_purge": "requires GitHub Support; not established",
+  "live_application_or_n8n_changed": false
+}
