@@ -1,0 +1,11 @@
+#view-tasks, #view-calendar { color: #182d26; gap: 16px; }
+.planner-jump { display: none; margin-bottom: 7px; }
+#planner-decision { border-top: 1px solid #dce2d6; margin-top: 16px; padding-top: 14px; }
+#planner-decision label { display: block; font-weight: 650; margin-bottom: 6px; }
+#planner-decision-status[data-error=true], #agenda-status[data-stale=true] { color: #9c3d3d; }
+.agenda-nav { display: flex; gap: 6px; flex-wrap: wrap; align-items: stretch; margin: 13px 0; }
+.agenda-nav label { flex: 1 1 120px; }
+.agenda-nav button { min-width: 35px; }
+#agenda-timezone { flex: none; white-space: nowrap; }
+.planner-command { display: block; overflow-wrap: anywhere; background: #edf2e7; padding: 8px 10px; border-radius: 7px; }
+@media(max-width:870px) { .planner-jump { display: block; } }

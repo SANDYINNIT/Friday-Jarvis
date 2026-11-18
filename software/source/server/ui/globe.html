@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>FRIDAY</title><style>
+html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;
+  font-family:Consolas,monospace;user-select:none;cursor:grab}
+body{display:grid;place-items:center}
+canvas{width:100%;height:100%}
+.label{position:absolute;bottom:12px;left:0;right:0;text-align:center;color:#9ff;
+  letter-spacing:.3em;font-size:11px;text-shadow:0 0 12px #1dd8cb;pointer-events:none}
+</style></head><body>
+<canvas id="c" width="240" height="240" aria-label="FRIDAY globe"></canvas>
+<div class="label">F R I D A Y</div>
+<script>
+(function () {
+  var api = window.pywebview && window.pywebview.api;
+  var cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  var N = 220, pts = [], ang = 0.5, pulse = 0, raf = 0;
+  for (var i = 0; i < N; i++) {
+    var y = 1 - 2 * (i + 0.5) / N, r = Math.sqrt(Math.max(0, 1 - y * y));
+    var a = i * 2.399963229728653;
+    pts.push([Math.cos(a) * r, y, Math.sin(a) * r]);
+  }
+  var reduced = false;
+  try { reduced = localStorage.getItem('friday_globe_reduced') === '1'; } catch (e) {}
+  function draw() {
+    var w = cv.width, h = cv.height, s = Math.min(w, h) * 0.34;
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2, k = 1 + pulse * 0.09;
+    ctx.strokeStyle = 'rgba(113,229,219,0.35)';
+    ctx.beginPath(); ctx.arc(cx, cy, s * 0.98 * k, 0, Math.PI * 2); ctx.stroke();
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      var X = p[0] * Math.cos(ang) + p[2] * Math.sin(ang);
+      var Z = p[2] * Math.cos(ang) - p[0] * Math.sin(ang);
+      if (Z < -0.05) continue;
+      var px = cx + X * s * 1.9, py = cy + p[1] * s * 1.9;
+      ctx.fillStyle = 'rgba(116,234,224,' + (0.25 + 0.6 * (Z + 1) / 2) + ')';
+      ctx.beginPath(); ctx.arc(px, py, Z > 0.4 ? 1.6 : 1.0, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function loop() { ang += 0.006; if (pulse > 0) pulse = Math.max(0, pulse - 0.05); draw(); raf = requestAnimationFrame(loop); }
+  function start() { if (raf) return; if (reduced) { draw(); return; } raf = requestAnimationFrame(loop); }
+  function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } draw(); }
+  window.addEventListener('resize', function () {
+    var r = cv.getBoundingClientRect(), d = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.max(1, Math.round(r.width * d)); cv.height = Math.max(1, Math.round(r.height * d));
+    ctx.setTransform(d, 0, 0, d, 0, 0); draw();
+  });
+  cv.width = 240; cv.height = 240;
+  start();
+
+  // gesture: drag moves the OS window (pywebview frameless), a click that
+  // barely moved is a double-click candidate.
+  var down = null, lastDown = 0, dragging = false, moved = 0;
+  document.addEventListener('pointerdown', function (e) {
+    down = { x: e.clientX, y: e.clientY }; moved = 0; dragging = false;
+    if (api && api.press) { try { api.press(e.clientX, e.clientY); } catch (err) {} }
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!down) return;
+    moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+    if (moved > 6 && !dragging) { dragging = true; document.body.style.cursor = 'grabbing'; }
+    if (dragging && api && api.drag) { try { api.drag(e.clientX, e.clientY); } catch (err) {} }
+  });
+  document.addEventListener('pointerup', function (e) {
+    if (down && dragging && api && api.drag_end) { try { api.drag_end(e.clientX, e.clientY); } catch (err) {} }
+    if (down && moved <= 6) {
+      var now = Date.now();
+      if (now - lastDown <= 400 && api && api.double_click) {
+        lastDown = 0;
+        try { api.double_click(e.clientX, e.clientY); } catch (err) {}
+      } else { lastDown = now; }
+    }
+    down = null; dragging = false; document.body.style.cursor = 'grab';
+  });
+  // playback-driven bounce: the page is told when audio is ACTUALLY playing.
+  window.GLOBE_EVENT = function (type) {
+    if (type === 'audio_chunk') { if (!reduced) pulse = Math.min(1, pulse + 0.45); start(); }
+    else if (type === 'audio_start') { if (!reduced) start(); }
+    else if (type === 'audio_end' || type === 'stop') { stop(); pulse = 0; draw(); }
+  };
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (api && api.double_click) api.double_click(0, 0); }
+  });
+})();
+</script></body></html>

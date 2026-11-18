@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "revision": 0,
+  "enabled": false,
+  "deployment": "",
+  "secret": "",
+  "capabilities": [],
+  "notifications": false,
+  "client_id": "",
+  "account_id": "host"
+}

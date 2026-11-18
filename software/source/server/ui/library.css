@@ -1,0 +1,18 @@
+.library-pane .ws-ledger { position: sticky; top: 0; }
+.library-pane .ws-ledger > div:not(.ws-filters) { max-height: 53vh; overflow: auto; padding: 3px; }
+.library-pane .ws-row .ws-state { white-space: normal; max-width: 11ch; text-align: center; }
+.library-source-status { min-height: 1.35em; }
+.library-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.library-detail-jump { display: none; margin-top: 9px; }
+.library-editor label { display: grid; gap: 5px; margin: 10px 0; color: #476052; font-size: 13px; font-weight: 650; }
+.library-editor [hidden] { display: none; }
+.library-pane .ws-history li { padding: 12px 0; }
+.library-pane .ws-history .library-text { margin: 6px 0; }
+.library-pane .ws-history .fn-meta { display: block; }
+.library-pane .ws-diagnostics { margin: 12px 0; }
+.library-pane .ws-diagnostics summary { cursor: pointer; }
+@media (max-width: 870px) {
+  .library-pane .ws-ledger { position: static; }
+  .library-pane .ws-ledger > div:not(.ws-filters) { max-height: 34vh; }
+  .library-pane .library-detail-jump { display: inline-block; }
+}

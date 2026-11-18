@@ -1,0 +1,22 @@
+{
+  "status": "INCOMPLETE_CONTRACT_TEMPLATE_NOT_DEPLOYABLE_WORKFLOW",
+  "active": false,
+  "requires": [
+    "Live pilot and draft inspection",
+    "Deployed node versions",
+    "Separate client-bound webhook credential",
+    "Namespaced durable outbox and atomic request/decision claims",
+    "Approved Gmail Calendar Docs scopes",
+    "Inactive mocked parity verification"
+  ],
+  "paths": {
+    "request": "POST /webhook/friday/v1/request",
+    "status": "POST /webhook/friday/v1/status",
+    "pull": "POST /webhook/friday/v1/pull",
+    "ack": "POST /webhook/friday/v1/ack"
+  },
+  "live_credentials_included": false,
+  "telegram_identifiers_included": false,
+  "historic_rows_included": false,
+  "publication": "Do not label this as a completed n8n workflow/export."
+}

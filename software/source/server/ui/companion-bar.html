@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FRIDAY Companion</title><link rel="stylesheet" href="companion-bar.css"></head>
+<body><main id="companion-launcher" data-expanded="false">
+<button type="button" id="anchor" aria-expanded="false" aria-controls="panel-content" aria-label="Open FRIDAY companion panel"><img src="friday-mark.svg" alt=""><span>FRIDAY</span><span id="anchor-dot" aria-hidden="true"></span><span class="chevron" aria-hidden="true">⌄</span></button>
+<section id="panel-content" hidden aria-label="FRIDAY companion controls">
+<header><div><p class="eyebrow">YOUR DESKTOP COMPANION</p><h1>Here with you.</h1></div><button type="button" id="collapse" aria-label="Collapse companion panel">⌃</button></header>
+<div class="activity"><span id="activity-dot" aria-hidden="true"></span><span id="activity-label" role="status">Activity unavailable</span></div>
+<p id="caption">Open FRIDAY for a conversation, or revisit a teaching note.</p>
+<button type="button" class="primary" data-open="home">Open FRIDAY <span aria-hidden="true">↗</span></button>
+<nav aria-label="Companion destinations"><button type="button" data-open="lessons"><span class="nav-mark" aria-hidden="true">▧</span><span>Teaching notes<small>Explanations, diagrams &amp; models</small></span><span aria-hidden="true">→</span></button><button type="button" data-open="inbox"><span class="nav-mark" aria-hidden="true">▱</span><span>Notifications<small id="inbox">No unread messages reported</small></span><span aria-hidden="true">→</span></button><button type="button" data-open="settings"><span class="nav-mark" aria-hidden="true">⋮</span><span>Companion settings<small>Cursor, appearance &amp; top panel</small></span><span aria-hidden="true">→</span></button></nav>
+<footer><button type="button" id="pin" aria-pressed="false">Keep open</button><button type="button" id="dismiss">Hide launcher</button></footer>
+<p id="panel-result" role="status" aria-live="polite"></p>
+</section></main><script src="companion-bar.js"></script></body></html>

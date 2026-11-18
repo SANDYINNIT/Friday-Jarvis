@@ -1,0 +1,12 @@
+{
+  "python311_ast_files": 499,
+  "javascript_syntax_files": 40,
+  "node_available": true,
+  "json_files": 8,
+  "syntax_errors": [],
+  "wheel_entries": 150,
+  "wheel_corrupt_entry": null,
+  "wheel_record_mismatches": [],
+  "html_local_refs_checked": 42,
+  "missing_html_assets": []
+}

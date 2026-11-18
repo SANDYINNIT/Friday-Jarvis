@@ -1,0 +1,31 @@
+.settings-layout { display: grid; grid-template-columns: 180px minmax(0,760px); gap: 36px; align-items: start; }
+.settings-index { display: flex; flex-direction: column; position: sticky; top: 18px; gap: 4px; }
+.settings-index a { color: #2e674c; padding: 10px 8px; border-radius: 8px; text-decoration: none; }
+.settings-index a:hover { background: #edf1e6; }
+.settings-section { padding: 6px 0 30px; margin-bottom: 26px; border-bottom: 1px solid #dce2d6; scroll-margin-top: 20px; }
+.settings-section h2 { font: 30px Georgia,serif; margin: 6px 0 10px; }
+.settings-section p { max-width: 65ch; }
+.settings-section form { margin: 22px 0; }
+.settings-section label { display: block; font-weight: 650; color: #182d26; margin-bottom: 7px; }
+.settings-section select { max-width: 360px; }
+.settings-section [role=status] { min-height: 1.5em; font-size: 14px; }
+.settings-section [data-error=true] { color: #9c3d3d; }
+.settings-section summary { cursor: pointer; padding: 10px 0; }
+.settings-pane :is(a,button,select,summary) { scroll-margin-block: 18px; }
+.settings-section .ws-actions { margin-top: 12px; }
+.settings-section dt { font-size: 13px; color: #57675e; }
+.settings-section dd { margin: 0 0 14px; overflow-wrap: anywhere; }
+@media(max-width:1000px) { .settings-layout { grid-template-columns: 1fr; gap: 22px; }.settings-index { position: static; flex-direction: row; flex-wrap: wrap; border-bottom: 1px solid #dce2d6; padding-bottom: 12px; } }
+
+/* Optional n8n settings reuse the calm Field Notes form hierarchy. */
+#settings-n8n fieldset { border:0; padding:0; margin:1rem 0; min-width:0; }
+#settings-n8n legend { font-weight:600; margin-bottom:.65rem; }
+#n8n-capabilities { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.45rem 1rem; }
+#settings-n8n #n8n-capabilities label { display:flex; align-items:center; gap:.6rem; margin:0; min-height:2rem; font-weight:400; }
+#settings-n8n #n8n-capabilities input { width:1rem; height:1rem; flex:0 0 1rem; margin:0; accent-color:var(--forest,#193e33); }
+#settings-n8n pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:16rem; overflow:auto; padding:.8rem; background:var(--paper,#f5f3e9); }
+#settings-n8n .ws-actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
+#settings-n8n input[type=password] { max-width:100%; }
+#settings-n8n .companion-check { display:flex; gap:.6rem; align-items:center; }
+#settings-n8n .companion-check input { width:1rem; height:1rem; flex:0 0 1rem; margin:0; }
+@media(max-width:450px) { #n8n-capabilities { grid-template-columns:1fr; } }

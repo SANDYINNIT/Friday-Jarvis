@@ -1,0 +1,41 @@
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) { color: #182d26; gap: 16px; }
+.ws-heading, .ws-ledger-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.ws-heading p { margin-bottom: 0; }
+.ws-layout { display: grid; grid-template-columns: minmax(245px,.8fr) minmax(0,1.4fr); gap: 19px; align-items: start; }
+.ws-ledger, .ws-detail, .ws-assignment { min-width: 0; background: #fffefa; border: 1px solid #dce2d6; border-radius: 17px; padding: 19px; }
+.ws-detail { padding: 23px; }
+.ws-ledger h2, .ws-detail h2 { margin: 0; font: 400 25px/1.2 Georgia,serif; color: #182d26; overflow-wrap: anywhere; }
+.ws-detail h2 { font-size: 33px; }
+.ws-detail h3 { font: 400 22px/1.2 Georgia,serif; margin: 0 0 10px; }
+.ws-detail p { overflow-wrap: anywhere; }
+.ws-filters, .ws-assignment-options { display: flex; align-items: end; gap: 10px; margin: 13px 0; flex-wrap: wrap; }
+.ws-assignment-options { margin-bottom: 0; }
+.ws-filters label, .ws-assignment label { display: grid; flex: 1 1 120px; gap: 5px; min-width: 0; color: #476052; font-size: 12px; font-weight: 650; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) input, :is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) select, :is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) textarea { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #cbd6c3; border-radius: 8px; background: #fffefa; color: #182d26; font: 14px "Segoe UI",sans-serif; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) textarea { resize: vertical; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) button { color: #244a36; background: #f7f8f1; border: 1px solid #cbd6c3; border-radius: 8px; padding: 8px 12px; font: 650 13px "Segoe UI",sans-serif; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) .ws-primary { color: #fffefa; background: #173f30; border-color: #173f30; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) button:disabled { opacity: .55; cursor: default; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) :focus-visible { outline: 3px solid #54875a; outline-offset: 2px; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) .ws-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 8px; width: 100%; text-align: left; padding: 11px 8px; border-color: transparent; background: transparent; border-radius: 8px; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) .ws-row:hover { background: #f4f7ee; }
+:is(#view-workspace,#view-tasks,#view-calendar,.library-pane,.routing-pane,.capability-pane,.workflow-pane,.settings-pane) .ws-row[aria-pressed=true] { background: #edf4e5; border-color: #b5cfae; }
+.ws-row strong { overflow-wrap: anywhere; }
+.ws-row .fn-meta { grid-column: 1/-1; font-weight: 400; }
+.ws-state { align-self: start; display: inline-block; border-radius: 12px; padding: 3px 7px; color: #395745; background: #eef2e8; font-size: 11px; font-weight: 600; }
+.ws-state[data-tone=review] { background: #f4ead4; color: #665022; }
+.ws-state[data-tone=error] { background: #f7e7df; color: #873f38; }
+.ws-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 14px; margin: 12px 0; }
+.ws-facts dt { color: #627267; font-size: 11px; }
+.ws-facts dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.ws-section { border-top: 1px solid #dce2d6; margin-top: 16px; padding-top: 14px; }
+.ws-history, .ws-artifact-list { list-style: none; padding: 0; margin: 0; }
+.ws-history li, .ws-artifact-list li { padding: 8px 0; border-bottom: 1px solid #ebeee6; overflow-wrap: anywhere; }
+.ws-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 9px; }
+#ws-status { color: #57675e; font-size: 13px; margin: 0; min-height: 1.4em; }
+#ws-status[data-error=true], .ws-error { color: #9c3d3d; }
+#ws-artifact-content { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 13px; background: #f1f4ea; border-radius: 8px; color: #253c31; font-size: 13px; }
+.ws-diagnostics { font-size: 12px; color: #627267; overflow-wrap: anywhere; }
+#ws-detail-jump { display: none; margin-bottom: 6px; }
+@media(max-width:870px) { .ws-layout { grid-template-columns: minmax(0,1fr); } .ws-ledger,.ws-detail { padding: 15px; } #ws-detail-jump { display: block; } }
+@media(max-width:520px) { .ws-heading { align-items: start; flex-wrap: wrap; } .ws-detail h2 { font-size: 27px; } .ws-facts { grid-template-columns: 1fr; } }

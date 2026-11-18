@@ -1,0 +1,35 @@
+#view-lab { color: #182d26; gap: 17px; }
+#fn-town-status { color: #57675e; font-size: 13px; margin: 0; }
+.fn-town-grid { display: grid; grid-template-columns: minmax(0,2.3fr) minmax(265px,1fr); align-items: start; gap: 19px; }
+.fn-town-scene, .fn-town-panel { min-width: 0; background: #fffefa; border: 1px solid #dce2d6; border-radius: 17px; box-shadow: 0 12px 34px #233e2710; }
+.fn-town-scene { overflow: hidden; }
+.fn-town-panel { padding: 17px; }
+.fn-town-panel h2 { margin: 0 0 8px; font: 400 23px Georgia, serif; }
+.fn-town-panel h3 { margin: 16px 0 6px; font-size: 14px; }
+.fn-town-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; }
+.fn-town-toolbar h2 { margin: 0; font: 700 14px "Segoe UI",sans-serif; }
+.fn-town-toolbar div, .fn-town-transport { display: flex; flex-wrap: wrap; gap: 6px; }
+#view-lab button { font: 600 12px "Segoe UI",sans-serif; color: #244a36; background: #f7f8f1; border: 1px solid #d5dfce; border-radius: 8px; padding: 7px 10px; }
+#view-lab button[aria-pressed="true"] { background: #e2edce; border-color: #8da67b; }
+#view-lab button:disabled { opacity: .55; }
+#view-lab :focus-visible { outline: 3px solid #54875a; outline-offset: 2px; }
+#fn-town-map { background: #94b57e; aspect-ratio: 1.47; overflow: hidden; touch-action: pan-y; display: grid; place-items: center; color: #1d382c; }
+#fn-town-map svg { display: block; width: 100%; height: 100%; overflow: hidden; }
+#fn-town-map .fn-town-room-name { font: 750 10px "Segoe UI",sans-serif; fill: #fbf7e5; paint-order: stroke; stroke: #2e5948; stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.fn-town-actor { cursor: pointer; }
+.fn-town-name { font: 750 11px "Segoe UI",sans-serif; text-anchor: middle; fill: #234332; paint-order: stroke; stroke: #fff5db; stroke-width: 4px; stroke-linejoin: round; }
+.fn-town-selection { stroke: #244f3a; stroke-width: 2; fill: #ebf5c355; }
+.fn-town-proposed { fill: #fcf3d68c; stroke: #254f3c; stroke-width: 2; stroke-dasharray: 3 3; }
+.fn-town-list { display: flex; flex-wrap: wrap; gap: 5px; padding: 9px 12px; }
+.fn-town-panel .fn-town-list { padding: 0; }
+.fn-town-key { margin: 0; border-top: 1px solid #dce2d6; padding: 8px 13px; font-size: 11px; color: #57675e; }
+.fn-town-inspector h2 { margin-top: 7px; }
+.fn-town-portrait { background: #dce8d3; }
+.fn-town-portrait svg { shape-rendering: crispEdges; }
+.fn-town-inspector .fn-fact dd { text-transform: none; }
+.fn-town-inspector meter { width: 100%; accent-color: #6d9659; }
+.fn-town-journal { max-height: 300px; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }
+.fn-town-journal li { border-top: 1px solid #e1e7da; padding: 7px 0; font-size: 12px; overflow-wrap: anywhere; }
+.fn-town-journal time { color: #57675e; font-weight: 650; margin-right: 6px; }
+@media(max-width:870px) { .fn-town-grid { grid-template-columns: minmax(0,1fr); gap: 13px; } }
+@media(max-width:520px) { .fn-town-toolbar { padding: 10px; } #fn-town-map { aspect-ratio: 1.12; } }

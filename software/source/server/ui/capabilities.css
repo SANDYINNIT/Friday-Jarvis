@@ -1,0 +1,19 @@
+.capability-pane { padding-bottom: 10px; }
+#capability-status { margin: 0; }
+#capability-list { max-height: 52vh; overflow: auto; padding: 3px; }
+#capability-list .ws-state { max-width: 15ch; white-space: normal; }
+#capability-jump { display: none; margin-top: 10px; }
+.capability-pane .ws-diagnostics { margin-top: 16px; }
+.capability-pane summary { cursor: pointer; }
+.capability-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.capability-inputs { margin: 10px 0; padding: 0; list-style: none; }
+.capability-inputs li { padding: 10px 0; border-top: 1px solid #e6eae0; overflow-wrap: anywhere; }
+.capability-inputs p { margin: 5px 0 0; }
+.capability-steps { padding-left: 22px; }
+.capability-steps li { padding: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.capability-help { border-top: 1px solid #dce2d6; padding-top: 15px; margin-bottom: 0; }
+.capability-pane :is(button,summary) { scroll-margin-block: 15px; }
+@media (max-width:870px) {
+  #capability-list { max-height: 34vh; }
+  #capability-jump { display: inline-block; }
+}

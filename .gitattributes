@@ -1,0 +1,17 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.whl binary
+*.png binary
+*.ico binary
+*.js text eol=lf
+*.cjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.lock text eol=lf
+*.in text eol=lf
+*.vbs text eol=crlf
+software/vendor/open-interpreter/** -text

@@ -1,0 +1,24 @@
+#view-voice { color: #182d26; gap: 18px; }
+.vs-sheet { background: #fffefa; border: 1px solid #dce2d6; border-radius: 17px; }
+.vs-overview { padding: 16px 24px; background: #edf3e7; border-radius: 16px 16px 0 0; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+.vs-overview strong { font-size: 13px; }
+.vs-section { display: grid; grid-template-columns: minmax(160px, .6fr) minmax(0, 1.5fr); gap: 28px; padding: 21px 24px; border-top: 1px solid #dce2d6; }
+.vs-section h2 { color: #182d26; margin: 6px 0; font: 400 31px/1.13 Georgia, serif; }
+.vs-heading p, .vs-body p { margin: 7px 0 0; color: #476052; }
+.vs-body { min-width: 0; }
+.vs-body .ws-facts { margin: 0 0 10px; gap: 9px 22px; }
+.vs-body dt { font-size: 12px; }
+.vs-body dd { font-size: 14px; }
+.vs-button { color: #fffefa; background: #173f30; border: 1px solid #173f30; border-radius: 8px; padding: 8px 12px; font: 650 13px "Segoe UI", sans-serif; }
+.vs-button.vs-secondary { color: #244a36; background: #f7f8f1; border-color: #cbd6c3; }
+.vs-button:disabled { opacity: .56; cursor: default; }
+.vs-result:empty { display: none; }
+.vs-body .vs-result[data-error=true] { color: #8c3934; }
+.vs-diagnostics { padding: 15px 24px; border-top: 1px solid #dce2d6; }
+.vs-diagnostics summary { cursor: pointer; color: #244a36; font-weight: 650; }
+#view-voice :focus-visible { outline: 3px solid #54875a; outline-offset: 2px; }
+#view-voice :is(button,summary) { scroll-margin-block: 18px; }
+@media (max-width: 620px) {
+  .vs-section { grid-template-columns: minmax(0, 1fr); gap: 13px; padding: 17px; }
+  .vs-overview, .vs-diagnostics { padding: 14px 17px; }
+}

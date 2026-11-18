@@ -1,0 +1,43 @@
+{
+  "credential_stripper_assertion": "passed as direct AST-extracted assertion; pytest unavailable",
+  "wheel_corresponding_source_mismatches": [],
+  "README_local_links_missing": [],
+  "provider_setup": {
+    "tests": 55,
+    "passed": 55
+  },
+  "linux_terminal_host_run": {
+    "tests": 20,
+    "passed": 19,
+    "errors": 1,
+    "reason": "Host has LiteLLM 1.83.0; supported lock requires 1.100.0. Guard retained; no runtime installation performed."
+  },
+  "platforms": {
+    "windows_native_launch": "not exercised",
+    "clean_linux": "unavailable; WSL lists no distributions",
+    "live_providers": "not called"
+  },
+  "shell_syntax": {
+    "powershell_scripts": 2,
+    "errors": 0,
+    "bash_scripts": 2
+  },
+  "history_rebuild": {
+    "initial_inventory_refusals": "Three stale generated report hashes; source hashes matched.",
+    "cross_volume_move": "Complete old Git copy verified with fsck before residual read-only objects were removed."
+  },
+  "source_checks": {
+    "python311_ast_files": 499,
+    "javascript_syntax_files": 40,
+    "node_available": true,
+    "json_files": 8,
+    "syntax_errors": [],
+    "wheel_entries": 150,
+    "wheel_corrupt_entry": null,
+    "wheel_record_mismatches": [],
+    "html_local_refs_checked": 42,
+    "missing_html_assets": []
+  },
+  "publication_scanner_assertion_groups": 4,
+  "initial_capture_directory_finding": "Six PNG files were still present in an ignored capture directory. They were verified against private recovery copies and physically removed before the release commit. Capture directory scan refusal added."
+}

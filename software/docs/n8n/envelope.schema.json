@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FRIDAY n8n v1 envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "origin",
+    "kind",
+    "id",
+    "client_id",
+    "account_id",
+    "session_id",
+    "created_at",
+    "expires_at",
+    "payload"
+  ],
+  "properties": {
+    "version": {
+      "const": "friday.n8n.v1"
+    },
+    "origin": {
+      "enum": [
+        "friday",
+        "n8n"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "status",
+        "request",
+        "pull",
+        "ack",
+        "event",
+        "result"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$"
+    },
+    "client_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$"
+    },
+    "account_id": {
+      "const": "host"
+    },
+    "created_at": {
+      "type": "number"
+    },
+    "expires_at": {
+      "type": "number"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

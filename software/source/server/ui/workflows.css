@@ -1,0 +1,16 @@
+.workflow-pane { padding-bottom: 10px; }
+.workflow-overview { background: #edf3e7; border: 1px solid #dce2d6; border-radius: 12px; padding: 14px 18px; }
+.workflow-overview p { margin: 5px 0 0; }
+#workflow-list { max-height: 51vh; overflow: auto; padding: 3px; }
+#workflow-list .ws-state { max-width: 15ch; white-space: normal; }
+#workflow-jump { display: none; margin-top: 10px; }
+.workflow-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.workflow-pane .ws-diagnostics { margin-top: 18px; }
+.workflow-pane summary { cursor: pointer; }
+.workflow-local-note { margin-bottom: 0; }
+.workflow-pane :is(button,summary) { scroll-margin-block: 15px; }
+#workflow-link-status:empty, #workflow-status:empty { display: none; }
+@media (max-width:870px) {
+  #workflow-list { max-height: 34vh; }
+  #workflow-jump { display: inline-block; }
+}

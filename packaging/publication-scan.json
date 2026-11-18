@@ -1,0 +1,46 @@
+{
+  "values_exported": false,
+  "worktree_files": 628,
+  "all_git_objects": 598,
+  "commits": 0,
+  "old_commits_present": [],
+  "findings": [],
+  "reviewed_synthetic_fixtures": [
+    {
+      "file": "software/test_n8n_bridge.py",
+      "category": "url-embedded-auth",
+      "lines": [
+        64
+      ],
+      "count": 1
+    },
+    {
+      "file": "tests/setup/test_user_routes.py",
+      "category": "url-embedded-auth",
+      "lines": [
+        116
+      ],
+      "count": 1
+    },
+    {
+      "file": "tests/setup/test_user_routes.py",
+      "category": "url-embedded-auth",
+      "lines": [
+        116
+      ],
+      "count": 1,
+      "object": "bc81ee5773e2589b8becf6078c91b1b7c0c33304"
+    },
+    {
+      "file": "software/test_n8n_bridge.py",
+      "category": "url-embedded-auth",
+      "lines": [
+        64
+      ],
+      "count": 1,
+      "object": "c0b08c42859688250ebe46dd7acb3666f0c2a7fb"
+    }
+  ],
+  "passed": true,
+  "limits": "Explicit patterns, archive and file review. Unknown secret formats and arbitrary private prose require human review. GitHub retained objects are outside this scan."
+}

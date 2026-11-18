@@ -1,0 +1,40 @@
+# Windows 10/11 x64, CPython 3.11; native Light/HUD, no optional LiveKit.
+./software/tmp-oi/open_interpreter-0.4.3-py3-none-any.whl
+fastapi==0.111.1
+uvicorn==0.34.3
+typer==0.12.5
+litellm==1.100.0
+openai==2.54.0
+RealtimeSTT==0.2.41
+RealtimeTTS==0.4.5
+torch==2.3.1
+torchaudio==2.3.1
+numpy==1.26.4
+pywebview==5.2
+pywin32==312
+pywinauto==0.6.9
+pywinctl>=0.3,<0.4
+pillow==10.3.0
+requests==2.34.2
+pytesseract==0.3.13
+pyautogui==0.9.54
+pystray==0.19.5
+mcp==1.26.0
+pyaudio==0.2.14
+python-dotenv==1.0.1
+psutil==5.9.8
+cryptography==50.0.1
+faster-whisper==1.0.3
+websockets>=12,<14
+websocket-client>=1.8,<2
+mss>=9,<11
+pynput>=1.7,<2
+pyperclip>=1.9,<2
+httpx>=0.27,<1
+truststore>=0.10,<1
+edge-tts>=7,<8
+# Typer0.12.5 uses the pre-Click8.2 metavar API.
+click==8.1.7
+# Bundled Open Interpreter imports pkg_resources; setuptools81+ removed it.
+setuptools==80.9.0
+wheel==0.45.1

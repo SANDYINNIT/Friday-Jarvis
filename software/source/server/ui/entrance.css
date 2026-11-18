@@ -1,0 +1,10 @@
+.friday-entrance[hidden]{display:none}
+.friday-entrance{position:fixed;inset:0;z-index:65;pointer-events:none;display:grid;place-items:center;overflow:hidden;background:#f6f5ee;color:#173a31}
+.entrance-paper{position:relative;width:min(430px,80vw);aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+.entrance-paper:before,.entrance-paper:after{content:"";position:absolute;inset:12%;border:1px solid #9eb48b;transform:rotate(45deg);border-radius:10px;opacity:.45}
+.entrance-paper:after{inset:4%;transform:rotate(45deg);opacity:.18}
+.entrance-mark{width:112px;height:112px;filter:drop-shadow(0 14px 18px #173a3120);z-index:1}
+.entrance-wordmark{font:600 clamp(30px,7vw,48px) Georgia,serif;letter-spacing:.14em;margin-left:.14em;z-index:1}
+.entrance-caption{font:12px system-ui,sans-serif;letter-spacing:.08em;color:#53694f;z-index:1}
+.entrance-stroke{position:absolute;left:15%;right:15%;top:50%;height:1px;background:#6c9157;transform-origin:center;opacity:.45}
+@media(prefers-reduced-motion:reduce){.friday-entrance{display:none}}

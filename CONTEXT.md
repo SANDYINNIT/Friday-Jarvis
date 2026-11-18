@@ -1,0 +1,3 @@
+# Distribution context
+
+FRIDAY extends Open Interpreter01 with a Windows Field Notes UI, routing, ownership guards, local knowledge, archives and optional integrations. This public staging copy adds a limited Linux text entry using the existing router/archive/FTS components without launching the Windows application. See README.md for exact commands, docs/PLATFORMS.md for limitations, and packaging/VERIFICATION.md for fresh evidence. No personal runtime data is included in working files. This checkout has fresh history. GitHub retained objects and previous clones require the separately documented owner cleanup.

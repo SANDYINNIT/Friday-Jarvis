@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY · Field Notes</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="field-notes.css">
+  <link rel="stylesheet" href="roster.css">
+  <link rel="stylesheet" href="town.css">
+  <link rel="stylesheet" href="workspace.css">
+  <link rel="stylesheet" href="library.css">
+  <link rel="stylesheet" href="voice-screen.css">
+  <link rel="stylesheet" href="routing.css">
+  <link rel="stylesheet" href="capabilities.css">
+  <link rel="stylesheet" href="workflows.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="planner.css">
+  <link rel="stylesheet" href="companion.css">
+  <link rel="stylesheet" href="entrance.css">
+  <link rel="icon" href="friday-mark.svg">
+<style>#view-lab > * {display:none!important} #view-lab > .public-town-exclusion {display:block!important;padding:2rem;max-width:50rem}</style>
+</head>
+<body>
+  <div id="friday-entrance" class="friday-entrance" aria-hidden="true" hidden><div class="entrance-paper"><span class="entrance-stroke"></span><img class="entrance-mark" src="friday-mark.svg" alt=""><span class="entrance-wordmark">FRIDAY</span><span class="entrance-caption">Opening your workspace</span></div></div>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="hud" data-pane="view-command">
+
+    <!-- ============ GLOBAL CHROME: TOP BAR ============ -->
+    <header class="topbar">
+      <button type="button" id="nav-toggle" class="btn nav-toggle" aria-controls="app-nav" aria-expanded="false">☰ <span>Menu</span></button>
+      <span class="page-crumb" id="page-crumb">Home</span>
+      <div class="topbar-drag" aria-hidden="true"></div>
+      <div class="topbar-mid">
+        <span class="status-chip" id="status-chip">
+          <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+          <span id="sys-state">CONNECTING</span>
+        </span>
+        <span class="clock" id="clock" aria-label="Local time">--:--:--</span>
+      </div>
+      <div class="topbar-right">
+        <button type="button" class="btn companion-trigger" data-companion-tab="lessons" aria-controls="companion-panel" aria-expanded="false">Notes</button>
+        <button type="button" class="btn companion-trigger" data-companion-tab="inbox" id="companion-inbox-trigger" aria-controls="companion-panel" aria-expanded="false">Inbox</button>
+        <span class="conn" id="conn" data-state="wait" role="status" aria-live="polite">Bridge: waiting</span>
+        <button type="button" class="btn btn-stop" id="btn-stop" data-stop disabled>Stop this turn</button>
+      </div>
+      <div class="window-controls" id="window-controls" role="group" aria-label="Window controls" hidden>
+        <button type="button" data-window-action="minimize" aria-label="Minimize window" title="Minimize window"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5h10"/></svg></button>
+        <button type="button" data-window-action="toggle_maximize" id="window-maximize" aria-label="Maximize window" title="Maximize window"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="maximize-glyph" d="M3.5 3.5h9v9h-9z"/><path class="restore-glyph" d="M5.5 5.5h7v7h-7z M3.5 10.5v-7h7"/></svg></button>
+        <button type="button" data-window-action="close" class="window-close" aria-label="Hide FRIDAY to tray" title="Hide FRIDAY to tray (keeps running)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8 M12 4l-8 8"/></svg></button>
+      </div>
+    </header>
+
+    <div class="shell">
+
+      <!-- ============ SIDEBAR NAV ============ -->
+      <button type="button" id="nav-backdrop" aria-label="Close navigation" tabindex="-1" hidden></button>
+      <nav class="sidebar" id="app-nav" aria-label="Screens">
+        <div class="brand"><img src="friday-mark.svg" alt=""><span>FRIDAY<small>PERSONAL ASSISTANT</small></span></div>
+        <button type="button" class="btn nav-close" id="nav-close">Close menu</button>
+        <div class="nav-group">
+          <div class="nav-group-h">YOUR SPACE</div>
+          <ul class="nav-list">
+          <li>
+          <button type="button" class="nav-item active" data-target="view-command" aria-current="page">
+          <span class="nav-num">01</span>
+          <span class="nav-label">Home</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-roster">
+          <span class="nav-num">13</span>
+          <span class="nav-label">AI Roster</span>
+          <span class="chip chip-lab">LAB</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-lab">
+          <span class="nav-num">15</span>
+          <span class="nav-label">Living Town</span>
+          <span class="chip chip-lab">LAB</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-workspace">
+          <span class="nav-num">14</span>
+          <span class="nav-label">Agent Workspace</span>
+          <span class="chip chip-lab">LAB</span>
+          </button>
+          </li>
+          </ul>
+          </div>
+          <div class="nav-group">
+          <div class="nav-group-h">ASSISTANT</div>
+          <ul class="nav-list">
+          <li>
+          <button type="button" class="nav-item" data-target="view-voice">
+          <span class="nav-num">02</span>
+          <span class="nav-label">Voice &amp; Screen</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-tasks">
+          <span class="nav-num">05</span>
+          <span class="nav-label">Tasks</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-calendar">
+          <span class="nav-num">06</span>
+          <span class="nav-label">Calendar</span>
+          </button>
+          </li>
+          </ul>
+          </div>
+          <details class="nav-more" id="nav-more">
+          <summary>More tools</summary>
+          <div class="nav-group">
+          <div class="nav-group-h">LIBRARY & SETTINGS</div>
+          <ul class="nav-list">
+          <li>
+          <button type="button" class="nav-item" data-target="view-core">
+          <span class="nav-num">03</span>
+          <span class="nav-label">AI Core</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-agents">
+          <span class="nav-num">04</span>
+          <span class="nav-label">Agents</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-memory">
+          <span class="nav-num">07</span>
+          <span class="nav-label">Memory</span>
+          <span class="badge" id="memory-count" hidden>0</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-conversations">
+          <span class="nav-num">08</span>
+          <span class="nav-label">Conversations</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-knowledge">
+          <span class="nav-num">09</span>
+          <span class="nav-label">Knowledge Base</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-tools">
+          <span class="nav-num">10</span>
+          <span class="nav-label">Tools &amp; Skills</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-workflows">
+          <span class="nav-num">11</span>
+          <span class="nav-label">Workflows</span>
+          </button>
+          </li>
+          <li>
+          <button type="button" class="nav-item" data-target="view-settings">
+          <span class="nav-num">12</span>
+          <span class="nav-label">Settings</span>
+          </button>
+          </li>
+          </ul>
+          </div>
+          </details>
+        <div class="side-foot">
+          <div class="side-foot-row"><span>Bridge</span><span id="side-conn">waiting</span></div>
+          <div class="side-foot-row"><span>Voice</span><span id="side-voice">—</span></div>
+        </div>
+      </nav>
+
+      <!-- ============ MAIN ============ -->
+      <main id="main" class="main" tabindex="-1">
+
+        <!-- Home keeps the existing bridge IDs; diagnostics stay available below. -->
+        <section id="view-command" class="pane active" aria-label="Home">
+          <div class="home-heading"><p class="eyebrow">YOUR SPACE</p><h1>Good to see you.</h1><p>Bring a question, an idea, or something you want to get done.</p></div>
+          <div class="home-grid">
+            <article class="home-chat" aria-label="Conversation">
+              <div class="home-chat-head"><div><h2>Conversation</h2><p id="home-turn-state" role="status">Connecting to FRIDAY…</p></div><button type="button" class="btn btn-ghost" id="cc-goto-conversations">History</button></div>
+              <p id="home-chat-update" class="home-note" role="status" hidden></p>
+              <section id="home-n8n-review" class="home-note" hidden aria-label="n8n request review"><p>An n8n request is waiting for your exact review. Nothing has been sent yet.</p><button id="home-n8n-settings" type="button">Review n8n request in Settings</button></section>
+              <section id="home-mcp-approval" class="home-note" hidden aria-label="MCP tool approval">
+                <strong>Approve this MCP call?</strong>
+                <p id="home-mcp-tool"></p>
+                <pre id="home-mcp-args" class="library-text"></pre>
+                <button type="button" id="home-mcp-allow">Allow once</button>
+                <button type="button" id="home-mcp-deny">Decline</button>
+                <p id="home-mcp-status" role="status"></p>
+              </section>
+              <div class="scroll-list" id="cc-chat" role="log" aria-label="Conversation messages" aria-live="polite" aria-relevant="additions text"></div>
+              <div id="home-composer-slot"></div>
+            </article>
+            <aside class="home-aside">
+              <section class="home-card"><p class="eyebrow">FRIDAY DUTY</p><h2>Who’s serving</h2>
+                <dl class="home-duty"><div><dt>Brain · current</dt><dd id="home-brain-current">Waiting for runtime…</dd></div><div><dt id="home-history-label">Last served</dt><dd id="home-brain-history">Not reported yet</dd></div><div><dt>Vision · current</dt><dd id="home-vision-current">Not reported by this bridge</dd></div></dl>
+                <button type="button" class="btn btn-ghost" data-open-pane="view-core">Open AI Core →</button>
+              </section>
+              <section class="home-card"><p class="eyebrow">VOICE & SCREEN</p><h2>Here when needed</h2>
+                <div class="home-live"><span class="globe-label" id="cc-label">Connecting</span><span class="chip" id="cc-paused-chip" hidden>PAUSED</span></div>
+                <p id="cc-detail" class="home-note">Waiting for the local assistant.</p>
+                <div id="globe-caption" aria-live="polite"></div><div class="speech-caption" id="speech-caption" aria-live="polite" hidden></div>
+                <div class="actions"><button type="button" class="btn" id="qa-mute" data-mute>Pause voice input</button><button type="button" class="btn" id="qa-voice">Voice &amp; Screen →</button></div>
+                <button type="button" class="btn btn-stop" data-stop disabled>Stop this turn</button>
+              </section>
+            </aside>
+          </div>
+          <details class="home-diagnostics"><summary>Runtime details</summary><div class="grid cc-bottom">
+            <article class="home-card"><h3>Voice measurements</h3><dl class="kv" id="cc-timings"></dl><dl class="kv"><div><dt>Sequence</dt><dd id="cc-seq">—</dd></div><div><dt>Muted</dt><dd id="cc-paused">—</dd></div><div><dt>Uptime</dt><dd id="cc-uptime">—</dd></div></dl><canvas id="globe" width="120" height="120" aria-hidden="true"></canvas></article>
+            <article class="home-card"><h3>Recent events</h3><div class="scroll-list" id="cc-events"></div></article>
+            <article class="home-card"><h3>Logs</h3><div class="scroll-list" id="cc-logs"></div><div id="cc-stats"><span id="stat-cpu"></span><span id="stat-ram"></span><span id="focus-pill"></span><span id="ear-pill"></span></div></article>
+          </div></details>
+        </section>
+
+        <!-- 02 VOICE & SCREEN -->
+        <section id="view-voice" class="pane" aria-label="Voice and Screen">
+          <header class="fn-roster-heading">
+            <div class="fn-eyebrow">ASSISTANT / INPUT &amp; OUTPUT</div>
+            <h1>Voice &amp; Screen</h1>
+            <p>See what FRIDAY is doing with voice and screen input.</p>
+          </header>
+          <div class="vs-sheet">
+            <div class="vs-overview">
+              <strong id="vs-connection" role="status">Waiting for the bridge…</strong>
+              <span class="fn-meta">Microphone and speaker connection status is unavailable here.</span>
+            </div>
+            <section class="vs-section" aria-labelledby="vs-listening">
+              <div class="vs-heading"><span class="fn-eyebrow" aria-hidden="true">01 / INPUT</span><h2 id="vs-listening">Listening</h2>
+                <p>Voice input uses the wake word “Friday”.</p></div>
+              <div class="vs-body">
+                <dl class="ws-facts">
+                  <div><dt>Voice input setting</dt><dd id="vs-preference">Unavailable</dd></div>
+                  <div><dt>Voice activity</dt><dd id="vs-input">Unavailable</dd></div>
+                  <div><dt>Follow-up window</dt><dd id="vs-followup">Unavailable</dd></div>
+                  <div><dt>Last wake match</dt><dd id="vs-wake">Unavailable</dd></div>
+                </dl>
+                <button type="button" id="vs-pause" class="vs-button" hidden>Pause voice input</button>
+                <p class="fn-meta" id="vs-input-help">Waiting for the voice input control.</p>
+                <p id="vs-action-result" class="fn-meta vs-result" role="status"></p>
+              </div>
+            </section>
+            <section class="vs-section" aria-labelledby="vs-speaking">
+              <div class="vs-heading"><span class="fn-eyebrow" aria-hidden="true">02 / OUTPUT</span><h2 id="vs-speaking">Speaking</h2>
+                <p>Playback status comes from the audio client.</p></div>
+              <div class="vs-body">
+                <dl class="ws-facts">
+                  <div><dt>Playback</dt><dd id="vs-playback">Unavailable</dd></div>
+                  <div><dt>Speech synthesis</dt><dd id="vs-synthesis">Unavailable</dd></div>
+                </dl>
+                <button type="button" class="vs-button vs-secondary" data-stop disabled>Stop this turn</button>
+                <p class="fn-meta">Stop requests cancellation of current and queued work and asks the audio client to discard buffered speech. Voice input and screen awareness settings stay in place. A separate speaker mute is unavailable here.</p>
+              </div>
+            </section>
+            <section class="vs-section" aria-labelledby="vs-screen">
+              <div class="vs-heading"><span class="fn-eyebrow" aria-hidden="true">03 / PERCEPTION</span><h2 id="vs-screen">Screen awareness</h2>
+                <p>View capture status without taking or displaying a screenshot.</p></div>
+              <div class="vs-body">
+                <dl class="ws-facts">
+                  <div><dt>Background capture setting</dt><dd id="vs-capture-setting">Unavailable</dd></div>
+                  <div><dt>Background capture activity</dt><dd id="vs-capture">Unavailable</dd></div>
+                  <div><dt>Recent screen history</dt><dd id="vs-history">Unavailable</dd></div>
+                  <div><dt>Screen request</dt><dd id="vs-request">Unavailable</dd></div>
+                </dl>
+                <p class="fn-meta">Ask about your screen in chat. Capture and history settings are managed outside this page.</p>
+              </div>
+            </section>
+            <details class="vs-diagnostics">
+              <summary>Diagnostics</summary>
+              <dl class="ws-facts">
+                <div><dt>Microphone and audio client connection</dt><dd>No live connection report</dd></div>
+                <div><dt>Configured providers</dt><dd>Not reported by this reader</dd></div>
+                <div><dt>Current provider duty</dt><dd>Not reported by this reader</dd></div>
+                <div><dt>Last reported synthesis result</dt><dd id="vs-synthesis-result">Unavailable</dd></div>
+                <div><dt>Last successful transcription and vision providers</dt><dd>Not reported by this reader</dd></div>
+                <div><dt>Age of last background frame</dt><dd id="vs-frame-age">Unavailable</dd></div>
+                <div><dt>Phrase feed to playback acknowledgement</dt><dd id="vs-first-audio">Unavailable</dd></div>
+              </dl>
+            </details>
+          </div>
+        </section>
+
+
+        <!-- 03 AI CORE -->
+        <section id="view-core" class="pane routing-pane" aria-label="AI Core">
+          <header class="fn-roster-heading ws-heading">
+            <div><div class="fn-eyebrow">SYSTEM / ROUTING</div><h1>AI Core</h1><p>Follow how FRIDAY chooses a route and see which capabilities have reported duty.</p></div>
+            <button type="button" id="core-open-agents">Browse routes</button>
+          </header>
+          <div class="routing-status">
+            <p id="routing-core-status" class="fn-meta" role="status">Waiting for routing data…</p>
+            <button type="button" class="routing-refresh">Refresh status</button>
+          </div>
+          <div class="ws-layout routing-core-layout">
+            <section class="ws-ledger" aria-labelledby="routing-core-capabilities">
+              <h2 id="routing-core-capabilities">Capability duty</h2>
+              <p class="fn-meta">Current activity and the last successful observation are reported separately.</p>
+              <div id="routing-duty"></div>
+            </section>
+            <section class="ws-detail" aria-labelledby="routing-brain-order">
+              <h2 id="routing-brain-order">Brain resolver order</h2>
+              <p class="fn-meta">The resolver may skip candidates based on configuration, policy, cooldown, or the current request. Fallback stays within the existing routing rules.</p>
+              <ol id="routing-order"></ol>
+              <details id="rollout-readiness" class="ws-diagnostics">
+                <summary>Rollout readiness</summary>
+                <p class="fn-meta">Local observations only. Unmatched routes may still use legacy routing. A saved binding restriction does not block dispatch through other routes.</p>
+                <button type="button" id="rollout-refresh">Refresh local evidence</button>
+                <p class="fn-meta" id="rollout-status" role="status"></p>
+                <div id="rollout-evidence"></div>
+              </details>
+              <details class="ws-diagnostics">
+                <summary>How to read this page</summary>
+                <p>Route order is available for the brain resolver. Other capabilities have their own selection paths. A reported success records a past outcome. Live provider health and device readiness require separate observations.</p>
+              </details>
+            </section>
+          </div>
+        </section>
+
+        <!-- 04 AGENTS -->
+        <section id="view-agents" class="pane routing-pane" aria-label="Agents">
+          <header class="fn-roster-heading ws-heading">
+            <div><div class="fn-eyebrow">SYSTEM / ROUTE DIRECTORY</div><h1>Agents</h1><p>Browse model and service routes. Persistent characters live in AI Roster.</p></div>
+            <button type="button" id="agents-open-core">Open AI Core</button>
+          </header>
+          <div class="routing-status">
+            <p id="routing-agents-status" class="fn-meta" role="status">Waiting for routing data…</p>
+            <button type="button" class="routing-refresh">Refresh status</button>
+          </div>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-labelledby="routing-directory">
+              <h2 id="routing-directory">Route directory</h2>
+              <div class="ws-filters">
+                <label>Search routes<input type="search" id="routing-search" autocomplete="off"></label>
+                <label>Capability<select id="routing-filter"><option value="">All capabilities</option><option value="brain">Brain</option><option value="vision">Vision</option><option value="listen">Listening</option><option value="voice_out">Voice</option><option value="workflow">Workflows</option></select></label>
+              </div>
+              <div id="routing-list" aria-label="Matching routes"></div>
+              <button type="button" id="routing-detail-jump">Go to selected details</button>
+            </section>
+            <section class="ws-detail" id="routing-detail" tabindex="-1" aria-label="Route details">
+              <div id="routing-profile"></div>
+              <button type="button" id="routing-character" class="ws-primary" hidden>Open character in AI Roster</button>
+            </section>
+          </div>
+        </section>
+
+
+        <!-- 05 TASKS -->
+        <section id="view-tasks" class="pane" aria-label="Tasks">
+          <header class="fn-roster-heading"><div class="fn-eyebrow">PLANNER / REQUESTS</div><h1>Tasks</h1><p>Keep track of personal work, reminders and decisions that need your attention.</p></header>
+          <p id="planner-task-status" class="fn-meta" role="status" aria-live="polite">Loading tasks…</p>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Task directory">
+              <div class="ws-ledger-heading"><h2>Task directory</h2><span class="fn-meta" id="planner-task-count"></span></div>
+              <div class="ws-filters">
+                <label>Search tasks<input id="planner-search" type="search" placeholder="Title, source or request ID"></label>
+                <label>Type<select id="planner-domain">
+                  <option value="">All types</option><option value="personal">Personal tasks</option><option value="reminder">Reminders</option>
+                  <option value="integration">Integration decisions</option><option value="workspace">Workspace tasks</option>
+                </select></label>
+              </div>
+              <button type="button" class="planner-jump" id="planner-task-jump" disabled>View selected task ↓</button>
+              <div id="planner-task-list" aria-label="Task records"></div>
+            </section>
+            <section class="ws-detail" id="planner-task-detail" tabindex="-1" aria-label="Task details">
+              <div id="planner-task-summary"></div>
+              <form id="planner-decision" hidden>
+                <label for="planner-answer">Your decision</label><textarea id="planner-answer" rows="3" required></textarea>
+                <div class="ws-actions"><button type="submit" class="ws-primary" id="planner-submit">Record decision</button></div>
+              </form>
+              <p id="planner-decision-status" class="fn-meta" role="status" aria-live="polite"></p>
+            </section>
+          </div>
+        </section>
+
+        <!-- 06 CALENDAR -->
+        <section id="view-calendar" class="pane" aria-label="Calendar">
+          <header class="fn-roster-heading ws-heading"><div><div class="fn-eyebrow">PLANNER / LOCAL SCHEDULE</div><h1>Calendar</h1><p>Review events recorded in your FRIDAY schedule.</p></div><button type="button" id="agenda-chat" class="ws-primary">Open chat to schedule</button></header>
+          <p id="agenda-status" class="fn-meta" role="status" aria-live="polite">Loading calendar…</p>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Agenda">
+              <div class="ws-ledger-heading"><h2 id="agenda-heading">Agenda</h2><span class="fn-meta" id="agenda-timezone"></span></div>
+              <div class="agenda-nav">
+                <button type="button" id="agenda-previous" aria-label="Previous date">←</button>
+                <label><span class="sr-only">Agenda date</span><input type="date" id="agenda-date"></label>
+                <button type="button" id="agenda-next" aria-label="Next date">→</button><button type="button" id="agenda-today">Today</button>
+                <button type="button" id="agenda-all" aria-pressed="false">All dates</button>
+              </div>
+              <button type="button" class="planner-jump" id="agenda-jump" disabled>View selected event ↓</button>
+              <div id="agenda-list" aria-label="Events"></div>
+              <details class="ws-section ws-diagnostics" id="agenda-unplaced" hidden><summary>Events without a confirmed date or timezone</summary><div id="agenda-unplaced-list"></div></details>
+            </section>
+            <section class="ws-detail" id="agenda-detail" tabindex="-1" aria-label="Event details"></section>
+          </div>
+        </section>
+
+        <section id="view-memory" class="pane library-pane" aria-label="Memory">
+          <header class="fn-roster-heading ws-heading"><div><div class="fn-eyebrow">REFERENCE / REMEMBERED DETAILS</div><h1>Memory</h1><p>Review shared facts, resident experiences and the history they came from.</p></div><button type="button" id="memory-library-add" class="ws-primary">Add shared fact</button></header>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Memory records">
+              <h2>Memory records</h2>
+              <div class="ws-filters"><label>Find a memory<input id="memory-library-search" type="search" autocomplete="off"></label><label>Show<select id="memory-library-filter"><option value="">All records</option><option value="fact">Current shared facts</option><option value="experience">Character experiences</option><option value="event">World events</option><option value="history">Retired history</option><option value="legacy">Unresolved ownership</option></select></label></div>
+              <p class="fn-meta library-source-status" id="memory-library-source" role="status"></p>
+              <div id="memory-library-list"></div>
+              <button type="button" class="library-detail-jump" id="memory-library-jump">Go to selected details</button>
+            </section>
+            <section class="ws-detail library-detail" id="memory-library-detail" tabindex="-1" aria-label="Memory details">
+              <div id="memory-library-record"></div>
+              <form id="memory-library-editor" class="ws-section library-editor" hidden>
+                <h3 id="memory-library-editor-title"></h3>
+                <label id="memory-library-key-label">Title<input id="memory-library-key" autocomplete="off"></label>
+                <label>Content<textarea id="memory-library-content" rows="5" required></textarea></label>
+                <label id="memory-library-reason-label">Reason for correction<input id="memory-library-reason" autocomplete="off"></label>
+                <div class="ws-actions"><button type="submit" class="ws-primary">Save memory</button><button type="button" id="memory-library-close">Close editor</button></div>
+              </form>
+              <div class="ws-section" id="memory-library-confirm" hidden>
+                <p id="memory-library-consequence"></p>
+                <div class="ws-actions"><button type="button" id="memory-library-forget">Confirm forget</button><button type="button" id="memory-library-cancel-forget">Cancel</button></div>
+              </div>
+              <p class="fn-meta" id="memory-library-outcome" role="status"></p>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-knowledge" class="pane library-pane" aria-label="Knowledge Base">
+          <header class="fn-roster-heading ws-heading"><div><div class="fn-eyebrow">REFERENCE / SOURCE LIBRARY</div><h1>Knowledge Base</h1><p>Import local references or browse the sources behind FRIDAY’s saved facts and summaries.</p></div></header>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Source directory">
+              <h2>Source directory</h2>
+              <div class="ws-filters"><label>Find a source or entry<input id="knowledge-library-search" type="search" autocomplete="off"></label><label>Show<select id="knowledge-library-filter"><option value="">All entries</option><option value="source">Source material</option><option value="fact">Saved facts</option><option value="summary">Generated summaries</option></select></label></div>
+              <p class="fn-meta library-source-status" id="knowledge-library-source" role="status"></p>
+              <div id="knowledge-library-list"></div>
+              <button type="button" class="library-detail-jump" id="knowledge-library-jump">Go to selected details</button>
+            </section>
+            <section class="ws-detail library-detail" id="knowledge-library-detail" tabindex="-1" aria-label="Knowledge Base details">
+              <details id="knowledge-import" class="ws-diagnostics">
+                <summary>Add a local source</summary>
+                <form id="knowledge-import-form" class="library-editor">
+                  <p class="fn-meta">Use pasted text or select a UTF-8 .txt or .md file up to 256 KiB. Relevant excerpts may be sent to your configured model for read-only local chat or voice answers.</p>
+                  <p id="knowledge-import-target" class="fn-meta"></p>
+                  <label>Source title<input id="knowledge-import-title" maxlength="120" required></label>
+                  <label>Paste source text<textarea id="knowledge-import-text" rows="5" maxlength="262144"></textarea></label>
+                  <label>Or select a text file<input id="knowledge-import-file" type="file" accept=".txt,.md,text/plain,text/markdown"></label>
+                  <div class="ws-actions"><button type="submit" id="knowledge-import-save">Save and index source</button><button type="button" id="knowledge-import-new" hidden>Switch to new source</button></div>
+                  <p id="knowledge-import-outcome" role="status"></p>
+                </form>
+              </details>
+              <div id="knowledge-library-record"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-conversations" class="pane library-pane" aria-label="Conversations">
+          <header class="fn-roster-heading ws-heading"><div><div class="fn-eyebrow">REFERENCE / CHAT ARCHIVE</div><h1>Conversations</h1><p>Read saved transcripts. Your current conversation stays in Home.</p></div><button type="button" id="conversations-library-home">Back to Home</button></header>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Saved conversations">
+              <h2>Saved conversations</h2>
+              <div class="ws-filters"><label>Find an archive by name<input id="conversations-library-search" type="search" autocomplete="off"></label></div>
+              <p class="fn-meta library-source-status" id="conversations-library-source" role="status"></p>
+              <div id="conversations-library-list"></div>
+              <button type="button" class="library-detail-jump" id="conversations-library-jump">Go to selected details</button>
+            </section>
+            <section class="ws-detail library-detail" id="conversations-library-detail" tabindex="-1" aria-label="Conversations details">
+              <div id="conversations-library-record"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 10 TOOLS & SKILLS -->
+        <section id="view-tools" class="pane capability-pane" aria-label="Tools and Skills">
+          <header class="fn-roster-heading ws-heading">
+            <div><div class="fn-eyebrow">REFERENCE / CAPABILITIES</div><h1>Tools &amp; Skills</h1><p>Browse the tools and saved procedures reported by FRIDAY.</p></div>
+            <button type="button" id="capability-refresh">Refresh inventory</button>
+          </header>
+          <p id="capability-status" class="fn-meta" role="status">Waiting for FRIDAY’s inventory…</p>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-labelledby="capability-directory">
+              <h2 id="capability-directory">Capability directory</h2>
+              <div class="ws-filters">
+                <label>Search capabilities<input type="search" id="capability-search" autocomplete="off"></label>
+                <label>Type<select id="capability-filter"><option value="">All types</option><option value="tool">Built-in tools</option><option value="procedure">Instruction procedures</option><option value="extension">Python skill files</option><option value="mcp">MCP tools</option><option value="integration">Configured connections</option></select></label>
+              </div>
+              <div id="capability-list"></div>
+              <button type="button" id="capability-jump">Go to selected details</button>
+              <details class="ws-diagnostics">
+                <summary>Inventory coverage</summary>
+                <div id="capability-sources"></div>
+                <p>This page reads FRIDAY’s loaded metadata and configured skill directory. Codex and ChatGPT skills have their own inventory.</p>
+              </details>
+            </section>
+            <section class="ws-detail" id="capability-detail" tabindex="-1" aria-label="Capability details">
+              <div id="capability-profile"></div>
+              <p class="fn-meta capability-help">Use chat to request work. Permission is checked when an action is requested.</p>
+            </section>
+          </div>
+        </section>
+
+
+        <!-- 11 WORKFLOWS -->
+        <section id="view-workflows" class="pane workflow-pane" aria-label="Workflows">
+          <header class="fn-roster-heading ws-heading">
+            <div><div class="fn-eyebrow">AUTOMATION / LOCAL RECORDS</div><h1>Workflows</h1><p>Review configured automation and the decisions waiting for your attention.</p></div>
+            <button type="button" id="workflow-refresh">Refresh local records</button>
+          </header>
+          <div class="workflow-overview">
+            <strong id="workflow-connection">Connection state unavailable</strong>
+            <p class="fn-meta" id="workflow-coverage">Waiting for local records…</p>
+            <p class="fn-meta" id="workflow-status" role="status"></p>
+          </div>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-labelledby="workflow-directory">
+              <h2 id="workflow-directory">Automation records</h2>
+              <div class="ws-filters">
+                <label>Search automation<input type="search" id="workflow-search" autocomplete="off"></label>
+                <label>Show<select id="workflow-filter"><option value="">All local records</option><option value="definition">Workflow configuration</option><option value="decision">Owner decisions</option></select></label>
+              </div>
+              <div id="workflow-list"></div>
+              <button type="button" id="workflow-jump">Go to selected details</button>
+              <p class="fn-meta workflow-local-note">Refresh reads local information. Workflow execution and connection management are outside this page.</p>
+            </section>
+            <section class="ws-detail" id="workflow-detail" tabindex="-1" aria-label="Automation details">
+              <div id="workflow-profile"></div>
+              <button type="button" id="workflow-task" class="ws-primary" hidden>Open exact decision in Tasks</button>
+              <p id="workflow-link-status" class="fn-meta" role="status"></p>
+            </section>
+          </div>
+        </section>
+
+
+        <!-- Settings uses existing registry, session and browser contracts. -->
+<section id="view-settings" class="pane settings-pane" aria-label="Settings">
+<header class="fn-roster-heading ws-heading"><div><div class="fn-eyebrow">PREFERENCES / SCOPE</div><h1>Settings</h1><p>Choose how FRIDAY starts and how this window behaves.</p></div><button type="button" id="settings-refresh">Refresh saved state</button></header>
+<p class="fn-meta" id="settings-status" role="status">Reading available settings…</p>
+<div class="settings-layout"><nav class="settings-index" aria-label="Settings sections"><a href="#settings-display">This window</a><a href="#settings-companion">Companion</a><a href="#settings-personality">Personality</a><a href="#settings-startup">Windows sign-in</a><a href="#settings-session">Voice input</a><a href="#settings-n8n">n8n / Workflows</a><a href="#settings-runtime">Runtime information</a></nav><div class="settings-content">
+<section id="settings-display" class="settings-section" aria-labelledby="settings-display-title"><p class="fn-eyebrow">BROWSER PREFERENCES</p><h2 id="settings-display-title">This window</h2><p>Saved only in this browser profile. Changes apply after Save; no restart.</p><div id="settings-preference-forms"></div></section>
+<section id="settings-personality" class="settings-section" aria-labelledby="personality-title"><p class="fn-eyebrow">CONVERSATION</p><h2 id="personality-title">Personality &amp; initiative</h2><p>Dry wit when welcome. Clear answers when it matters.</p><form id="personality-form" class="companion-preference-form"><label for="personality-banter">Private text banter</label><select id="personality-banter" aria-describedby="personality-privacy" disabled><option value="off">Off · respectful and neutral</option><option value="light">Light · occasional affectionate teasing</option><option value="spicy">Spicy · occasional roasts and profanity</option></select><p id="personality-privacy" class="companion-note">For the user’s private text on this window only. Light or Spicy makes these replies text-only. This is your choice, not identity verification. Voice, Telegram, n8n and notifications stay neutral. Say “stop joking” to turn banter off.</p><label class="companion-check"><input id="personality-suggestions" type="checkbox" disabled>Offer useful local suggestions</label><p class="companion-note">Owner decisions and open priority tasks can add a quiet Inbox suggestion, at most once per ten minutes and eight per day per session. A suggestion never approves or executes an action. Off does not cancel reminders you requested.</p><p id="personality-saved" class="companion-note">Reading preferences…</p><div class="companion-actions"><button id="personality-save" type="submit" disabled>Save choices</button><button id="personality-cancel" type="button" disabled>Cancel edits</button><button id="personality-refresh" type="button">Refresh saved state</button></div><p id="personality-result" role="status"></p><details><summary>Expression &amp; scope</summary><p id="personality-expression" class="companion-note"></p><p class="companion-note">Focused, amused and concerned are wording cues, not subjective feelings. No psychological profile is created. Preferences are saved on this computer; expression and suggestions last for this session.</p></details></form></section>
+<section id="settings-companion" class="settings-section" aria-labelledby="settings-companion-title"><p class="fn-eyebrow">DESKTOP COMPANION</p><h2 id="settings-companion-title">Cursor buddy &amp; top panel</h2><p>Keep FRIDAY beside your pointer, and open a compact control panel while the main window is hidden.</p><form id="settings-companion-preferences" class="companion-preference-form" data-companion-preferences><p class="companion-note">Saved on this computer. These choices do not enable recording, screen capture or computer control.</p><label for="settings-companion-cursor">Cursor buddy</label><select id="settings-companion-cursor" data-preference="cursor"><option value="off">Off</option><option value="when_asked">When showing a highlight or teaching card</option><option value="always">Always beside my cursor</option></select><label for="settings-companion-style">Companion appearance</label><select id="settings-companion-style" data-preference="style"><option value="friday">FRIDAY mark</option><option value="pointer">Little pointer</option><option value="leaf">Field Notes leaf</option><option value="bee">Voxel bee · click the top bee to open FRIDAY</option></select><label class="companion-check"><input type="checkbox" id="settings-companion-top-panel" data-preference="top-panel">Show the top panel when FRIDAY is hidden</label><label class="companion-check"><input type="checkbox" id="settings-companion-reduced-motion" data-preference="reduced-motion">Reduced companion motion</label><label class="companion-check"><input type="checkbox" id="settings-companion-teaching" data-preference="teaching">Allow local teaching cards and notifications</label><p class="companion-note">Hiding the app keeps FRIDAY running. A true Exit closes the buddy and top panel. Notifications and notes last for this session, up to 30 minutes; they are not automatically saved as memories or tasks.</p><p class="companion-note" data-preference="saved"></p><div class="companion-actions"><button type="submit" id="settings-companion-save" data-preference="save">Save preferences</button><button type="button" id="settings-companion-cancel" data-preference="cancel">Cancel edits</button></div><p id="settings-companion-save-result" data-preference="result" role="status"></p><p id="settings-companion-native-state" data-preference="native" class="companion-note"></p><p data-preference="entrance" class="companion-note" role="status"></p></form></section>
+<section id="settings-startup" class="settings-section" aria-labelledby="settings-startup-title"><p class="fn-eyebrow">SAVED WINDOWS REGISTRATION</p><h2 id="settings-startup-title">Start at sign-in</h2><p>Applies at your next Windows sign-in. Saving does not launch or restart FRIDAY.</p><form id="settings-startup-form"><label for="setting-startup">Start FRIDAY at Windows sign-in</label><select id="setting-startup" disabled><option value="">State unavailable</option><option value="on">On</option><option value="off">Off</option></select><p class="fn-meta" id="startup-state"></p><div class="ws-actions"><button type="submit" class="ws-primary" id="settings-startup-save" disabled>Save startup</button><button type="button" id="settings-startup-cancel" disabled>Cancel</button></div><p id="settings-startup-result" role="status"></p></form></section>
+<section id="settings-session" class="settings-section" aria-labelledby="settings-session-title"><p class="fn-eyebrow">SESSION ONLY</p><h2 id="settings-session-title">Voice input</h2><p>Allow or pause voice input for this server session. Playback and screen awareness are separate.</p><p id="settings-voice-state" class="fn-meta">Unavailable</p><button type="button" data-mute disabled>Pause voice input</button><p id="settings-voice-result" role="status"></p><p class="fn-meta" id="settings-voice-receipt">Audio client status unavailable</p><p class="fn-meta">Client acknowledgement confirms a software input gate. It does not hardware-mute the microphone. This setting lasts for the current session.</p></section>
+<section id="settings-n8n" class="settings-section" aria-labelledby="settings-n8n-title">
+<p class="fn-eyebrow">OPTIONAL AUTOMATION</p><h2 id="settings-n8n-title">n8n / Workflows</h2>
+<p>FRIDAY sends selected requests to n8n. Notices arrive through authenticated pull and storage receipts; n8n Cloud never needs access to this computer.</p>
+<p id="n8n-state" role="status">Reading local configuration…</p>
+<form id="n8n-form" class="companion-preference-form">
+<label class="companion-check"><input type="checkbox" id="n8n-enabled">Enable selected n8n requests</label>
+<label for="n8n-deployment">Replace deployment address (private)</label><input id="n8n-deployment" type="password" autocomplete="off" placeholder="Leave blank to keep saved address">
+<p class="fn-meta" id="n8n-deployment-state"></p>
+<label for="n8n-secret">Set or rotate shared credential</label><input id="n8n-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep saved credential">
+<p id="n8n-key-state" class="fn-meta"></p>
+<fieldset><legend>Allowed capabilities</legend><div id="n8n-capabilities"></div></fieldset>
+<label class="companion-check"><input id="n8n-notifications" type="checkbox">Receive notices while FRIDAY is running</label>
+<p class="fn-meta">Off by default. When enabled, the server pulls every 30 seconds; opening or refreshing Settings never sends a request. A received notice never approves an action.</p>
+<div class="ws-actions"><button id="n8n-save" type="submit">Save configuration</button><button id="n8n-cancel" type="button">Cancel edits</button><button id="n8n-remove-key" type="button">Remove credential and disable</button></div>
+</form>
+<p id="n8n-result" role="status"></p><div class="ws-actions"><button id="n8n-test" type="button">Test bridge contract</button><button id="n8n-pull" type="button">Pull notices now</button></div>
+<p class="fn-meta">Test sends a status request only. Saving, testing, activating an n8n workflow and executing a selected request are separate. Requests must be explicitly selected in chat and confirmed below; ordinary chat stays with FRIDAY's normal router.</p>
+<section id="n8n-proposal" hidden><h3>Review request before sending</h3><pre id="n8n-proposal-text"></pre><button id="n8n-send" type="button">Send this exact request</button><button id="n8n-request-cancel" type="button">Cancel request</button></section>
+<h3>Received events</h3><div id="n8n-inbox"></div>
+<section id="n8n-decision" hidden><h3>Exact remote action review</h3><pre id="n8n-decision-text"></pre><p>Approval is one-use and bound to this action, its arguments, this account/session and expiry. It is not a Workspace review or an answer to the oldest pending question.</p><button id="n8n-approve" type="button">Approve this exact action</button><button id="n8n-reject" type="button">Reject this exact action</button></section>
+<details><summary>Connection and receipt details</summary><p id="n8n-observation"></p><p>A transport receipt, remote outcome and reported workflow completion are separate. A timeout after dispatch has an unknown remote outcome; no automatic action retry is performed. Legacy integrations are not migrated here.</p></details>
+</section>
+<section id="settings-runtime" class="settings-section" aria-labelledby="settings-runtime-title"><p class="fn-eyebrow">READ ONLY</p><h2 id="settings-runtime-title">Runtime information</h2><p>Routing, provider setup and catalog controls are managed separately. This page grants no permissions or connections.</p><details><summary>Reported runtime settings</summary><div id="settings-dump"></div></details><p class="fn-meta">No restart-required configuration editor is supported here. Tray availability and device pause receipt are not reported by this reader.</p></section>
+</div></div></section>
+
+<!-- 13 AI ROSTER (FUTURE LAB) -->
+        <section id="view-roster" class="pane" aria-label="AI Roster">
+          <header class="fn-roster-heading"><div class="fn-eyebrow">DIRECTORY / IDENTITIES</div><h1>AI Roster</h1><p>Meet the characters behind FRIDAY and the services that support them.</p></header>
+          <div class="fn-roster-toolbar"><p id="fn-roster-status" role="status" aria-live="polite">Loading the shared identity view…</p><button type="button" id="fn-roster-refresh" class="fn-control">Refresh view</button></div>
+          <div class="fn-roster-grid">
+            <section class="fn-directory" aria-label="Character directory">
+              <div class="fn-directory-heading"><h2>Directory</h2><span class="fn-meta" id="fn-roster-count"></span></div>
+              <label class="fn-search-label" for="fn-roster-search">Find a character or service</label>
+              <input type="search" id="fn-roster-search" placeholder="Name, model, provider or capability…" autocomplete="off">
+              <div class="fn-tabs" role="group" aria-label="Directory sections"><button type="button" data-roster-filter="characters" aria-pressed="true">Characters</button><button type="button" data-roster-filter="services" aria-pressed="false">Services</button><button type="button" data-roster-filter="history" aria-pressed="false">History</button></div>
+              <button type="button" class="fn-profile-jump" id="fn-profile-jump" disabled>Choose an entry to read its profile</button>
+              <div id="fn-person-list" class="fn-person-list" aria-label="Directory entries"></div>
+              <p class="fn-meta fn-directory-foot" id="fn-roster-revision">Catalog unavailable</p>
+            </section>
+            <section class="fn-profile" id="fn-profile" aria-label="Selected roster profile" tabindex="-1"></section>
+          </div>
+          <details class="fn-workforce" id="roster-workforce"><summary>Existing workforce tools & diagnostics</summary><p class="fn-meta">These tools use legacy worker IDs, not inferred catalog identities. Opening them loads the existing Lab adapter. This does not enroll or reconcile characters.</p>
+
+          <!-- population #1: the people (never a map) -->
+          <article class="card">
+            <div class="card-h">Residents (simulation) <span class="hint">identity · capabilities · life · duty</span>
+              <span class="chip chip-lab">LAB</span>
+            </div>
+            <div class="roster-people" id="roster-people"><div class="empty-s">Loading residents…</div></div>
+          </article>
+
+          <div class="grid roster-top">
+            <article class="card grow">
+              <div class="card-h">Task workforce <span class="hint">handoffs between residents</span>
+                <span class="chip chip-lab">LAB</span>
+              </div>
+              <div class="roster-stage" id="roster-stage" tabindex="0" aria-label="Roster graph. Use Tab to move between agent nodes."></div>
+              <div class="legend">
+                <span class="legend-item"><i class="sw sw-active"></i>active</span>
+                <span class="legend-item"><i class="sw sw-pending"></i>pending</span>
+                <span class="legend-item"><i class="sw sw-blocked"></i>blocked</span>
+              </div>
+              <details class="diag"><summary>diagnostics</summary>
+                <code>get_roster(): agents/edges/tasks (lab_state.roster_snapshot)</code>
+              </details>
+            </article>
+            <article class="card">
+              <div class="card-h">Agent inspector <span class="hint">selected resident</span></div>
+              <div id="roster-inspector"></div>
+            </article>
+          </div>
+
+          <!-- population #2: the providers -->
+          <article class="card">
+            <div class="card-h">Model chain (providers) <span class="hint">configured providers &amp; models — shared by every resident</span>
+              <span class="chip chip-lab">LAB</span>
+            </div>
+            <div id="roster-chain" class="list"><div class="empty-s">Loading chain…</div></div>
+            <details class="diag"><summary>diagnostics</summary>
+              <code>get_roster().authority (public_state: cast + life + serving from lab_authority)</code>
+            </details>
+          </article>
+
+          <div class="grid roster-bottom">
+            <article class="card">
+              <div class="card-h">ASSIGN TASK</div>
+              <form id="assign-form" class="stack-form">
+                <label class="field">
+                  <span class="field-label">Agent</span>
+                  <select id="assign-agent" class="input"></select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Goal</span>
+                  <textarea id="assign-goal" class="input" rows="3" placeholder="What should this agent do?"></textarea>
+                </label>
+                <label class="field">
+                  <span class="field-label">Budget (max steps)</span>
+                  <input id="assign-budget" class="input" type="number" min="1" max="1000" value="20">
+                </label>
+                <button type="submit" class="btn btn-primary">Assign task</button>
+                <div class="form-status" id="assign-status" role="status" aria-live="polite"></div>
+              </form>
+              <div class="field-label">Task status</div>
+              <div class="list" id="roster-task-status"></div>
+            </article>
+            <article class="card">
+              <div class="card-h">ARTIFACTS</div>
+              <div class="list" id="roster-artifacts"></div>
+            </article>
+            <article class="card">
+              <div class="card-h">APPROVALS</div>
+              <div class="list" id="roster-approvals"></div>
+            </article>
+          </div>
+          </details>
+        </section>
+
+        <!-- 14 AGENT WORKSPACE -->
+        <section id="view-workspace" class="pane" aria-label="Agent Workspace">
+          <header class="fn-roster-heading ws-heading">
+            <div><div class="fn-eyebrow">WORKSPACE / TASK LEDGER</div><h1>Agent Workspace</h1><p>Track requests, attempts, and results that need your review.</p></div>
+            <button type="button" class="ws-primary" id="ws-new" aria-expanded="false" aria-controls="ws-assignment">New assignment</button>
+          </header>
+          <form id="ws-assignment" class="ws-assignment" hidden>
+            <label>What should the worker do?<textarea id="ws-goal" rows="3" required></textarea></label>
+            <div class="ws-assignment-options">
+              <label>Task worker<select id="ws-owner" required><option value="">Choose a worker</option></select></label>
+              <label>Review policy<select id="ws-policy"><option value="automatic">Automatic after result is saved</option><option value="manual">Require my review</option></select></label>
+              <button class="ws-primary" type="submit" id="ws-assign-submit">Assign task</button>
+            </div>
+          </form>
+          <p id="ws-status" role="status" aria-live="polite">Loading the task ledger…</p>
+          <div class="ws-layout">
+            <section class="ws-ledger" aria-label="Task list">
+              <div class="ws-ledger-heading"><h2>Task ledger</h2><span id="ws-count" class="fn-meta"></span></div>
+              <div class="ws-filters">
+                <label>Search tasks<input id="ws-search" type="search" placeholder="Goal or worker" autocomplete="off"></label>
+                <label>State<select id="ws-filter"><option value="">All states</option></select></label>
+              </div>
+              <button type="button" id="ws-detail-jump" disabled>View selected task ↓</button>
+              <div id="ws-list" aria-label="Tasks"></div>
+            </section>
+            <section class="ws-detail" id="ws-detail" aria-label="Task details" tabindex="-1">
+              <div id="ws-summary"></div>
+              <div id="ws-artifacts"></div>
+              <p id="ws-read-status" class="fn-meta" role="status"></p>
+              <pre id="ws-artifact-content" tabindex="0" aria-label="Artifact content" hidden></pre>
+              <div id="ws-history"></div>
+              <div id="ws-diagnostics"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 15 LIVING TOWN -->
+        <section id="view-lab" class="pane" aria-label="Living Town"><article class="public-town-exclusion" role="status"><h1>Living Town is not included in this public package</h1><p>The artwork has no verified redistribution license. Its assets and dependent visual page are excluded. The live Windows installation is unchanged; model configuration does not enroll residents.</p></article>
+          <header class="fn-roster-heading"><div class="fn-eyebrow">SIMULATION / TOWN GROUNDS</div><h1>Living Town</h1><p>Follow a resident through their day or inspect a station that supports FRIDAY.</p></header>
+          <p id="roster-town-handoff" class="fn-town-handoff" hidden role="status"></p>
+          <p id="fn-town-status" role="status">Loading Town…</p>
+          <div class="fn-town-grid">
+            <section class="fn-town-scene" aria-label="Town map">
+              <div class="fn-town-toolbar"><h2>Town grounds</h2><div role="group" aria-label="Map camera">
+                <button type="button" id="fn-town-fit">Fit</button><button type="button" id="fn-town-minus" aria-label="Zoom out">−</button><button type="button" id="fn-town-plus" aria-label="Zoom in">+</button><button type="button" id="fn-town-follow" aria-pressed="false">Follow resident</button>
+              </div></div>
+              <div id="fn-town-map" tabindex="0" aria-label="Town map. Use arrow keys to pan when zoomed. An accessible resident list follows."></div>
+              <div class="fn-town-list" id="fn-town-residents" role="group" aria-label="Residents and proposed placements"></div>
+              <p class="fn-town-key">Solid markers are simulation residents. Dashed markers are proposals. Station cards are separate procedural services.</p>
+            </section>
+            <section class="fn-profile fn-town-inspector" id="lab-inspector" aria-label="Town inspector" tabindex="-1"></section>
+            <section class="fn-town-panel" aria-label="Simulation controls">
+              <h2>Simulation clock</h2><p id="fn-town-clock">Waiting for simulation</p>
+              <div class="fn-town-transport" role="group" aria-label="Simulation controls">
+                <button type="button" data-town-action="play" disabled>Play</button><button type="button" data-town-action="pause" disabled>Pause</button><button type="button" data-town-action="step" disabled>Step</button><button type="button" data-town-action="save" disabled>Save</button><button type="button" data-town-action="load" disabled>Load</button>
+              </div><p id="fn-town-result" role="status"></p>
+              <h3>Service stations</h3><div class="fn-town-list" id="fn-town-services" role="group" aria-label="Procedural service stations"></div>
+            </section>
+            <section class="fn-town-panel" aria-label="Town journal"><h2>Town journal</h2><p class="fn-meta">Recent committed simulation events</p><ol id="fn-town-journal" class="fn-town-journal"></ol></section>
+          </div>
+          <details class="fn-workforce" id="fn-town-install">
+            <summary>Catalog resident installation</summary>
+            <p class="fn-meta">Review placements without changing Town. To install, pause and save Town, then review a fresh preview.</p>
+            <button type="button" id="town-install-preview">Preview installation</button>
+            <p id="town-install-status" role="status"></p>
+            <div id="town-install-evidence"></div>
+            <div id="town-install-confirm" hidden>
+              <label><input type="checkbox" id="town-install-reviewed"> I reviewed this exact preview and will leave unresolved residents unchanged.</label>
+              <button type="button" id="town-install-apply" disabled>Back up and install</button>
+            </div>
+            <div id="town-install-restore" hidden>
+              <label><input type="checkbox" id="town-install-restore-reviewed"> Restore only the installation batch shown above.</label>
+              <button type="button" id="town-install-rollback" disabled>Roll back installation</button>
+            </div>
+          </details>
+          <details class="fn-workforce" id="fn-town-legacy" hidden><summary>Existing simulation policies and resident memories</summary>
+            <p class="fn-meta">These existing tools use source resident IDs and the legacy Lab policy. Catalog life and serving permissions are separate.</p>
+            <div class="fn-town-transport" role="group" aria-label="Existing Lab policy">
+              <button type="button" id="lab-budget-pause">Pause background life</button><button type="button" id="lab-budget-open">Open background life</button>
+              <button type="button" id="lab-ai-on">Enable existing AI life policy</button><button type="button" id="lab-ai-off">Disable existing AI life policy</button>
+              <button type="button" id="lab-budget-toggle">Enable budget</button><button type="button" id="lab-budget-off">Disable budget</button>
+            </div>
+            <p class="fn-meta">Background budget <b id="lab-budget-enabled">unavailable</b> · presence <b id="lab-budget-presence">?</b> · requests <b id="lab-budget-requests">?</b> · tokens <b id="lab-budget-tokens">?</b> · usage <b id="lab-budget-attempts">?</b></p>
+            <div id="fn-town-legacy-inspector"></div>
+          </details>
+        </section>
+      </main>
+    </div>
+
+    <!-- ============ GLOBAL CHROME: FOOTER ============ -->
+    <footer class="footer" id="global-composer-slot">
+      <form id="chat-form" class="chat-bar" autocomplete="off">
+        <label class="sr-only" for="chat-input">Message FRIDAY</label>
+        <input type="text" id="chat-input" placeholder="Message FRIDAY…" aria-describedby="chat-status">
+        <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+        <span class="chat-status" id="chat-status" role="status" aria-live="polite"></span>
+      </form>
+      <div class="footer-meta" id="footer-meta">local · offline-capable</div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <aside id="companion-panel" aria-label="FRIDAY companion" hidden>
+    <header class="companion-heading"><div><p class="companion-eyebrow">FRIDAY / COMPANION</p><h2 id="companion-heading-title">Teaching notes</h2></div><button type="button" id="companion-close" aria-label="Close companion panel">Close</button></header>
+    <div class="companion-tabs" aria-label="Companion sections"><button type="button" data-companion-tab="lessons" aria-pressed="true">Teaching notes</button><button type="button" data-companion-tab="inbox" aria-pressed="false">Inbox</button><button type="button" data-companion-tab="settings" aria-pressed="false">Preferences</button></div>
+    <p id="companion-status" role="status">Waiting for the local runtime.</p>
+    <section class="companion-content" id="companion-records"><p class="companion-note" id="companion-scope"></p><div id="companion-list" aria-label="Local cards"></div><article id="companion-detail"><p id="companion-meta" class="companion-note"></p><h3 id="companion-title"></h3><p id="companion-text"></p><canvas id="companion-scene" width="640" height="480" tabindex="0" aria-label="Interactive teaching model" hidden></canvas><p id="companion-scene-help" class="companion-note"></p><div class="companion-scene-controls" id="companion-scene-controls" hidden><button type="button" id="companion-rotate">Rotate model</button><button type="button" id="companion-zoom-in">Zoom in</button><button type="button" id="companion-reset">Reset view</button></div><button type="button" id="companion-mark-read" hidden>Mark as read</button></article></section>
+    <section class="companion-content" id="companion-preferences-wrap" hidden><form id="companion-preferences" class="companion-preference-form" data-companion-preferences><p class="companion-note">Saved on this computer. These choices do not enable recording, screen capture or computer control.</p><label for="companion-cursor">Cursor buddy</label><select id="companion-cursor" data-preference="cursor"><option value="off">Off</option><option value="when_asked">When showing a highlight or teaching card</option><option value="always">Always beside my cursor</option></select><label for="companion-style">Companion appearance</label><select id="companion-style" data-preference="style"><option value="friday">FRIDAY mark</option><option value="pointer">Little pointer</option><option value="leaf">Field Notes leaf</option><option value="bee">Voxel bee · click the top bee to open FRIDAY</option></select><label class="companion-check"><input type="checkbox" id="companion-top-panel" data-preference="top-panel">Show the top panel when FRIDAY is hidden</label><label class="companion-check"><input type="checkbox" id="companion-reduced-motion" data-preference="reduced-motion">Reduced companion motion</label><label class="companion-check"><input type="checkbox" id="companion-teaching" data-preference="teaching">Allow local teaching cards and notifications</label><p class="companion-note">Hiding the app keeps FRIDAY running. A true Exit closes the buddy and top panel. Notifications and notes last for this session, up to 30 minutes; they are not automatically saved as memories or tasks.</p><p class="companion-note" data-preference="saved"></p><div class="companion-actions"><button type="submit" id="companion-save" data-preference="save">Save preferences</button><button type="button" id="companion-cancel" data-preference="cancel">Cancel edits</button></div><p id="companion-save-result" data-preference="result" role="status"></p><p id="companion-native-state" data-preference="native" class="companion-note"></p></form></section>
+  </aside>
+
+  <script src="roster.js"></script>
+  <script src="town-art.js"></script>
+  <script src="town.js"></script>
+  <script src="town-install.js"></script>
+  <script src="workspace.js"></script>
+  <script src="planner.js"></script>
+  <script src="personal-planner.js"></script>
+  <script src="library.js"></script>
+  <script src="voice-screen.js"></script>
+  <script src="routing.js"></script>
+  <script src="capabilities.js"></script>
+  <script src="workflows.js"></script>
+  <script src="settings.js"></script>
+  <script src="n8n-settings.js"></script>
+  <script src="window-controls.js"></script>
+  <script src="entrance.js"></script>
+  <script src="companion.js"></script>
+  <script src="personality.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+/* Approved Field Notes directory/profile composition, using shipped shell. */
+#view-roster { color: #182d26; gap: 20px; }
+.fn-roster-heading { margin: 3px 0 1px; }
+.fn-eyebrow { color: #375946; font-size: 10px; font-weight: 750; letter-spacing: .16em; margin-bottom: 10px; }
+.fn-roster-heading h1 { font: 400 54px/1.1 Georgia, serif; letter-spacing: -.035em; margin: 0 0 10px; color: #182d26; }
+.fn-roster-heading p, .fn-subtle { color: #57675e; line-height: 1.6; }
+.fn-roster-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#fn-roster-status { font-size: 13px; color: #57675e; margin: 0; }
+#fn-roster-status[data-state="error"] { color: #9c3d3d; }
+.fn-control { border: 1px solid #cbd6c3; border-radius: 8px; background: #f7f8f1; color: #244a36; padding: 9px 13px; font: 600 12px/1.4 "Segoe UI", sans-serif; }
+.fn-control:disabled, .fn-primary:disabled { opacity: .6; cursor: not-allowed; }
+.fn-roster-grid { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(310px,1fr); gap: 20px; align-items: start; }
+.fn-directory, .fn-profile { border: 1px solid #dce2d6; border-radius: 17px; background: #fffefa; box-shadow: 0 12px 34px #233e2710; min-width: 0; }
+.fn-directory { padding: 18px 14px; }
+.fn-profile { padding: 24px; }
+.fn-directory-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 6px 14px; }
+.fn-directory h2, .fn-profile h2 { font: 400 29px/1.15 Georgia,serif; color: #182d26; margin: 0; overflow-wrap: anywhere; }
+.fn-search-label { display: block; font-size: 12px; color: #57675e; margin: 0 6px 6px; }
+#fn-roster-search { width: 100%; border: 1px solid #cbd6c3; border-radius: 8px; background: #fffefa; color: #182d26; font: 14px "Segoe UI",sans-serif; padding: 11px; }
+.fn-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid #dce2d6; margin: 12px 0; gap: 5px; }
+.fn-tabs button { color: #57675e; border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 10px 8px; font: 650 12px "Segoe UI",sans-serif; }
+.fn-tabs [aria-pressed="true"] { border-bottom-color: #2c6a47; color: #244a36; }
+.fn-person-list { display: grid; gap: 6px; }
+.fn-person { display: grid; grid-template-columns: 49px minmax(0,1fr) auto; align-items: center; gap: 10px; text-align: left; padding: 12px 9px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: #182d26; width: 100%; font-family: inherit; }
+.fn-person:hover { background: #f2f5ec; }
+.fn-person[aria-pressed="true"] { border-color: #b5cfae; background: #edf4e5; }
+.fn-person-name { display: block; font-size: 16px; font-weight: 740; overflow-wrap: anywhere; }
+.fn-meta { display: block; font-size: 12px; color: #627267; line-height: 1.55; overflow-wrap: anywhere; }
+.fn-person .fn-chips { justify-content: end; max-width: 130px; }
+.fn-portrait { width: 49px; height: 49px; border-radius: 10px; display: grid; place-items: center; overflow: hidden; flex: none; }
+.fn-portrait svg { width: 35px; height: 41px; }
+.fn-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.fn-chip { display: inline-block; border: 1px solid #d4dfcc; border-radius: 20px; color: #355b40; background: #eff3e8; padding: 3px 8px; font-size: 10px; line-height: 1.4; }
+.fn-identity-head { display: flex; align-items: center; gap: 13px; margin: 15px 0; }
+.fn-identity-head .fn-portrait { width: 64px; height: 64px; }
+.fn-identity-head .fn-portrait svg { width: 45px; height: 54px; }
+.fn-identity-head h2 { font-size: 35px; }
+.fn-callout { border-left: 3px solid #82a16a; border-radius: 4px; background: #f1f5e9; color: #35533e; padding: 12px 13px; font-size: 13px; line-height: 1.6; margin: 16px 0; }
+.fn-profile dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 14px; margin: 16px 0; }
+.fn-fact { border-top: 1px solid #e4e8de; padding: 10px 0; }
+.fn-fact dt { color: #627267; font-size: 11px; margin-bottom: 4px; }
+.fn-fact dd { margin: 0; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.fn-identity-block { border-top: 1px solid #dce2d6; margin-top: 15px; padding-top: 13px; }
+.fn-profile h3 { color: #244a36; font-size: 14px; font-weight: 700; margin: 0 0 9px; }
+.fn-binding { display: flex; align-items: start; justify-content: space-between; gap: 10px; padding: 9px 0; font-size: 13px; overflow-wrap: anywhere; }
+.fn-binding>div { min-width: 0; }
+.fn-binding .fn-chips { justify-content: end; }
+.fn-identity-block .fn-control { margin: 10px 5px 5px 0; }
+.fn-primary { width: 100%; color: #fffefa; background: #173f30; border: 1px solid #173f30; border-radius: 8px; padding: 12px; font: 650 13px "Segoe UI",sans-serif; margin: 18px 0 7px; }
+.fn-provenance { border-top: 1px solid #dce2d6; margin-top: 15px; padding-top: 12px; font-size: 12px; color: #627267; }
+.fn-provenance summary { cursor: pointer; }
+.fn-provenance code { display: block; overflow-wrap: anywhere; white-space: normal; margin-top: 9px; color: #57675e; background: transparent; }
+.fn-directory-foot { padding: 12px 6px 0; margin: 0; }
+.fn-profile-jump { display: none; background: #edf4e5; border: 1px solid #cbd6c3; border-radius: 7px; padding: 9px 11px; color: #244a36; font: 600 12px "Segoe UI",sans-serif; width: 100%; margin-bottom: 8px; text-align: left; }
+.fn-empty { padding: 15px 9px; color: #627267; font-size: 13px; }
+.fn-workforce { border-top: 1px solid #dce2d6; padding-top: 14px; }
+.fn-workforce>summary { cursor: pointer; color: #57675e; font-size: 13px; }
+.fn-workforce>.card, .fn-workforce>.grid { margin-top: 15px; }
+.fn-town-handoff { padding: 12px; border: 1px solid #b5cfae; background: #edf4e5; border-radius: 10px; color: #244a36; font-size: 13px; }
+#view-roster button:focus-visible, #view-roster input:focus-visible, #view-roster summary:focus-visible { outline: 3px solid #54875a; outline-offset: 3px; }
+@media(max-width:1080px) { .fn-roster-grid { grid-template-columns: minmax(0,1fr) minmax(280px,1fr); gap: 14px; } .fn-profile { padding: 18px; } .fn-person { grid-template-columns: 44px minmax(0,1fr); } .fn-person>.fn-chips { grid-column: 2; justify-content: start; max-width: none; } .fn-person>.fn-portrait { grid-row: span 2; } }
+@media(max-width:870px) { .fn-roster-grid { grid-template-columns: minmax(0,1fr); } .fn-profile-jump { display: block; } .fn-roster-heading h1 { font-size: 41px; } .fn-person { grid-template-columns: 49px minmax(0,1fr) auto; } .fn-person>.fn-portrait { grid-row: auto; } .fn-person>.fn-chips { grid-column: auto; justify-content: end; } .fn-directory, .fn-profile { border-radius: 14px; } }
+@media(max-width:520px) { .fn-roster-heading h1 { font-size: 37px; } .fn-roster-toolbar { align-items: start; } .fn-person { grid-template-columns: 40px minmax(0,1fr); } .fn-person>.fn-portrait { width: 40px; height: 44px; grid-row: span 2; } .fn-person>.fn-chips { grid-column: 2; justify-content: start; } .fn-binding { flex-wrap: wrap; } }

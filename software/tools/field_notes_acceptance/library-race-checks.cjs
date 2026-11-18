@@ -1,0 +1,36 @@
+/* Actual shipped editor and canonical store, with a held acknowledgement. */
+const assert=require('node:assert/strict');
+module.exports=async({page,rpc,text,hold,shot,check,requests})=>{
+  const nav=page.locator('[data-target=view-memory]');
+  await nav.evaluate(el=>el.closest('details')&&(el.closest('details').open=true));await nav.click();
+  await text('#memory-library-list',/Studio hours/);
+  await page.locator('[data-library-key="mem-2"]').click();
+  await page.locator('#memory-library-record').getByRole('button',{name:'Correct',exact:true}).click();
+  const content=page.locator('#memory-library-content'),editor=page.locator('#memory-library-editor');
+  await content.fill('Submitted correction');
+  const pending=hold('update_memory');
+  await page.getByRole('button',{name:'Save memory',exact:true}).click();await pending.received;
+  await content.fill('Newer unsaved correction');
+  pending.release();
+  await text('#memory-library-outcome',/Submitted memory saved.*newer draft/);
+  assert.equal(await editor.isVisible(),true,'A delayed save acknowledgement discarded newer edits');
+  assert.equal(await content.inputValue(),'Newer unsaved correction');
+  const saved=(await rpc('get_memory_library')).canonical.current.rows;
+  assert.ok(saved.some(row=>row.content==='Submitted correction'));
+  assert.ok(!saved.some(row=>row.content==='Newer unsaved correction'));
+  await text('#memory-library-outcome',/newer draft|newer edit/i);
+  await shot('second-pass-memory-draft',false);
+  assert.equal(await page.getByRole('button',{name:'Save memory',exact:true}).isDisabled(),true);
+  const writes=()=>requests.filter(row=>row.method==='update_memory');
+  const savedRef=saved.find(row=>row.content==='Submitted correction').ref;
+  assert.equal(writes().length,1);
+  await page.getByRole('button',{name:'Continue editing saved version',exact:true}).click();
+  await text('#memory-library-outcome',/Now editing the confirmed current version/);
+  assert.equal(writes().length,1,'Continuing a draft must not save it automatically');
+  assert.equal(await content.inputValue(),'Newer unsaved correction');
+  await page.getByRole('button',{name:'Save memory',exact:true}).click();
+  await editor.waitFor({state:'hidden'});
+  assert.equal(writes().length,2);assert.equal(writes()[1].args[0],savedRef);
+  assert.ok((await rpc('get_memory_library')).canonical.current.rows.some(row=>row.content==='Newer unsaved correction'));
+  check('Delayed memory acknowledgement preserves newer text; explicit continuation selects the exact confirmed version and saves only on request');
+};

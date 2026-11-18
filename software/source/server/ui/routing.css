@@ -1,0 +1,22 @@
+.routing-pane { padding-bottom: 10px; }
+.routing-status { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.routing-status p { margin: 0; }
+.routing-core-layout { grid-template-columns: minmax(245px,1fr) minmax(0,1fr); }
+#routing-duty > article, #routing-order > li { padding: 10px 0; border-bottom: 1px solid #e6eae0; }
+#routing-duty > article:last-child, #routing-order > li:last-child { border-bottom: 0; }
+#routing-duty h3 { margin: 0; font: 400 21px/1.2 Georgia,serif; }
+#routing-duty .ws-facts { margin: 8px 0 0; }
+#routing-order { padding-inline-start: 24px; }
+#routing-order li { padding-inline-start: 4px; overflow-wrap: anywhere; }
+#routing-order li span { display: block; }
+.routing-pane .ws-diagnostics { margin-top: 18px; }
+.routing-pane .ws-diagnostics summary { cursor: pointer; }
+.routing-pane :is(button,summary) { scroll-margin-block: 14px; }
+#routing-list { max-height: 53vh; overflow: auto; padding: 3px; }
+#routing-detail-jump { display: none; margin-top: 10px; }
+#routing-character { margin-top: 12px; }
+@media (max-width: 870px) {
+  .routing-core-layout { grid-template-columns: minmax(0,1fr); }
+  #routing-list { max-height: 35vh; }
+  #routing-detail-jump { display: inline-block; }
+}
